@@ -23,6 +23,9 @@ screening:
   max_volatility_pct: 15.0
   max_coins: 10
   refresh_interval_min: 30
+  always_include:              # 항상 포함할 코인
+    - KRW-BTC
+    - KRW-XRP
 
 strategy:
   lookahead_minutes: 5

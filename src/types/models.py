@@ -62,6 +62,7 @@ class Signal:
 @dataclass(frozen=True)
 class ScreeningResult:
     market: str
+    korean_name: str
     volume_krw: Decimal
     volatility: Decimal
     score: Decimal
