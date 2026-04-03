@@ -1,0 +1,43 @@
+# Crypto Paper Trader 설정
+
+paper_trading:
+  initial_balance: 10000000    # 1,000만원
+  max_position_pct: 0.25       # 종목당 최대 25%
+  max_open_positions: 4        # 동시 최대 4종목
+  fee_rate: 0.0005             # Upbit 0.05%
+  slippage_rate: 0.0005        # 0.05%
+  min_order_krw: 5000          # 최소 주문 5,000원
+
+risk:
+  stop_loss_pct: 0.02          # 2% 손절
+  take_profit_pct: 0.05        # 5% 익절
+  trailing_stop_pct: 0.015     # 1.5% 트레일링 스탑
+  max_daily_loss_pct: 0.05     # 일일 최대 손실 5%
+  max_daily_trades: 50
+  consecutive_loss_limit: 5    # 연속 손실 시 중지
+  cooldown_minutes: 60
+
+screening:
+  min_volume_krw: 500000000    # 최소 5억원
+  min_volatility_pct: 1.0
+  max_volatility_pct: 15.0
+  max_coins: 10
+  refresh_interval_min: 30
+
+strategy:
+  lookahead_minutes: 5
+  threshold_pct: 0.3
+  retrain_interval_hours: 6
+  min_confidence: 0.6
+
+collector:
+  candle_timeframe: 1          # 1분봉
+  max_candles_per_market: 200
+  market_refresh_interval_min: 60
+
+data:
+  db_path: "data/paper_trader.db"
+  model_dir: "data/models"
+  stale_candle_days: 7
+  stale_model_days: 30
+  stale_order_days: 90
