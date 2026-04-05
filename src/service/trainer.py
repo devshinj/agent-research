@@ -69,6 +69,7 @@ class Trainer:
             colsample_bytree=0.8,
             random_state=42,
             verbose=-1,
+            n_jobs=1,
         )
         model.fit(X_train, y_train)
 
