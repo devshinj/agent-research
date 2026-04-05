@@ -4,6 +4,8 @@ import asyncio
 import logging
 from pathlib import Path
 
+import pandas as pd
+
 from src.config.settings import Settings
 from src.repository.database import Database
 from src.repository.candle_repo import CandleRepository
@@ -65,6 +67,15 @@ class App:
             positions={},
         )
         self.screened_markets: list[str] = []
+
+    @staticmethod
+    def _candles_to_df(candles: list) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"open": float(c.open), "high": float(c.high),
+             "low": float(c.low), "close": float(c.close),
+             "volume": float(c.volume)}
+            for c in reversed(candles)
+        ])
 
     async def start(self) -> None:
         logger.info("Starting Crypto Paper Trader...")
@@ -152,13 +163,7 @@ class App:
                 logger.info("Not enough candles for %s: %d", market, len(candles))
                 continue
 
-            import pandas as pd
-            df = pd.DataFrame([
-                {"open": float(c.open), "high": float(c.high),
-                 "low": float(c.low), "close": float(c.close),
-                 "volume": float(c.volume)}
-                for c in reversed(candles)
-            ])
+            df = self._candles_to_df(candles)
 
             result = self.trainer.train(market, df)
             if result["model_path"] is not None:
@@ -180,13 +185,7 @@ class App:
             if len(candles) < 200:
                 continue
 
-            import pandas as pd
-            df = pd.DataFrame([
-                {"open": float(c.open), "high": float(c.high),
-                 "low": float(c.low), "close": float(c.close),
-                 "volume": float(c.volume)}
-                for c in reversed(candles)
-            ])
+            df = self._candles_to_df(candles)
 
             result = self.trainer.train(market, df)
             if result["model_path"] is not None:
@@ -222,14 +221,7 @@ class App:
             if len(candles) < 60:
                 continue
 
-            import pandas as pd
-            from decimal import Decimal
-            df = pd.DataFrame([
-                {"open": float(c.open), "high": float(c.high),
-                 "low": float(c.low), "close": float(c.close),
-                 "volume": float(c.volume)}
-                for c in reversed(candles)
-            ])
+            df = self._candles_to_df(candles)
 
             try:
                 signal = self.predictor.predict(market, df)
