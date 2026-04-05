@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import pandas as pd
 
 from src.config.settings import Settings
-from src.repository.database import Database
 from src.repository.candle_repo import CandleRepository
+from src.repository.database import Database
 from src.repository.order_repo import OrderRepository
 from src.repository.portfolio_repo import PortfolioRepository
 from src.runtime.event_bus import EventBus
@@ -22,8 +22,8 @@ from src.service.risk_manager import RiskManager
 from src.service.screener import Screener
 from src.service.trainer import Trainer
 from src.service.upbit_client import UpbitClient
-from src.types.events import NewCandleEvent, ScreenedCoinsEvent, SignalEvent, TradeEvent
-from src.types.models import PaperAccount
+from src.types.events import ScreenedCoinsEvent, SignalEvent, TradeEvent
+from src.types.models import Candle, PaperAccount
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class App:
         self.screened_markets: list[str] = []
 
     @staticmethod
-    def _candles_to_df(candles: list) -> pd.DataFrame:
+    def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
         return pd.DataFrame([
             {"open": float(c.open), "high": float(c.high),
              "low": float(c.low), "close": float(c.close),
@@ -232,8 +232,8 @@ class App:
                 pass  # 모델 미로드
 
     async def _on_signal(self, event: SignalEvent) -> None:
+
         from src.types.enums import SignalType
-        from decimal import Decimal
 
         signal_model = __import__("src.types.models", fromlist=["Signal"]).Signal(
             event.market, event.signal_type, event.confidence, event.timestamp,
