@@ -18,6 +18,7 @@ from src.service.portfolio import PortfolioManager
 from src.service.predictor import Predictor
 from src.service.risk_manager import RiskManager
 from src.service.screener import Screener
+from src.service.trainer import Trainer
 from src.service.upbit_client import UpbitClient
 from src.types.events import NewCandleEvent, ScreenedCoinsEvent, SignalEvent, TradeEvent
 from src.types.models import PaperAccount
@@ -50,6 +51,12 @@ class App:
         self.risk_manager = RiskManager(settings.risk, settings.paper_trading)
         self.paper_engine = PaperEngine(settings.paper_trading)
         self.portfolio_manager = PortfolioManager(settings.risk)
+        self.trainer = Trainer(
+            self.feature_builder,
+            settings.data.model_dir,
+            settings.strategy.lookahead_minutes,
+            float(settings.strategy.threshold_pct),
+        )
 
         # State
         self.account = PaperAccount(
