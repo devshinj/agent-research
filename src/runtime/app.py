@@ -97,6 +97,10 @@ class App:
         # Initial data
         await self.collector.refresh_markets()
 
+        # Initial screening + model training
+        await self._refresh_screening()
+        await self._train_missing_models()
+
         # Schedule periodic tasks
         self.scheduler.schedule_interval(
             "collect_candles", self._collect_and_predict,
@@ -132,6 +136,32 @@ class App:
             self.predictor.load_model(market, model_files[0])
             loaded += 1
         return loaded
+
+    async def _train_missing_models(self) -> None:
+        """Train models for screened markets that don't have a loaded model."""
+        timeframe = f"{self.settings.collector.candle_timeframe}m"
+        for market in self.screened_markets:
+            if market in self.predictor._models:
+                continue
+            candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
+            if len(candles) < 200:
+                logger.info("Not enough candles for %s: %d", market, len(candles))
+                continue
+
+            import pandas as pd
+            df = pd.DataFrame([
+                {"open": float(c.open), "high": float(c.high),
+                 "low": float(c.low), "close": float(c.close),
+                 "volume": float(c.volume)}
+                for c in reversed(candles)
+            ])
+
+            result = self.trainer.train(market, df)
+            if result["model_path"] is not None:
+                self.predictor.load_model(market, result["model_path"])
+                logger.info("Trained and loaded model for %s (accuracy: %.3f)", market, result["accuracy"])
+            else:
+                logger.info("Training skipped for %s: insufficient valid samples", market)
 
     async def stop(self) -> None:
         await self._save_state()
