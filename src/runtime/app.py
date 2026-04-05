@@ -114,6 +114,10 @@ class App:
             "refresh_markets", self.collector.refresh_markets,
             interval_seconds=self.settings.collector.market_refresh_interval_min * 60,
         )
+        self.scheduler.schedule_interval(
+            "retrain_models", self._retrain,
+            interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
+        )
 
         logger.info("App started. Seed: %s KRW", self.settings.paper_trading.initial_balance)
 
@@ -162,6 +166,34 @@ class App:
                 logger.info("Trained and loaded model for %s (accuracy: %.3f)", market, result["accuracy"])
             else:
                 logger.info("Training skipped for %s: insufficient valid samples", market)
+
+    async def _retrain(self) -> None:
+        """Retrain models for all screened markets."""
+        if self.paused or not self.screened_markets:
+            return
+
+        logger.info("Starting periodic retrain for %d markets", len(self.screened_markets))
+        timeframe = f"{self.settings.collector.candle_timeframe}m"
+        trained = 0
+        for market in self.screened_markets:
+            candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
+            if len(candles) < 200:
+                continue
+
+            import pandas as pd
+            df = pd.DataFrame([
+                {"open": float(c.open), "high": float(c.high),
+                 "low": float(c.low), "close": float(c.close),
+                 "volume": float(c.volume)}
+                for c in reversed(candles)
+            ])
+
+            result = self.trainer.train(market, df)
+            if result["model_path"] is not None:
+                self.predictor.load_model(market, result["model_path"])
+                trained += 1
+
+        logger.info("Retrain complete: %d/%d markets updated", trained, len(self.screened_markets))
 
     async def stop(self) -> None:
         await self._save_state()
