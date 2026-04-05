@@ -90,6 +90,10 @@ class App:
         self.event_bus.subscribe(SignalEvent, self._on_signal)
         self.event_bus.subscribe(TradeEvent, self._on_trade)
 
+        # Load existing ML models
+        loaded = await self._load_existing_models()
+        logger.info("Loaded %d existing models", loaded)
+
         # Initial data
         await self.collector.refresh_markets()
 
@@ -108,6 +112,26 @@ class App:
         )
 
         logger.info("App started. Seed: %s KRW", self.settings.paper_trading.initial_balance)
+
+    async def _load_existing_models(self) -> int:
+        """Load all .pkl models from data/models/ into predictor."""
+        model_dir = Path(self.settings.data.model_dir)
+        if not model_dir.exists():
+            model_dir.mkdir(parents=True, exist_ok=True)
+            return 0
+
+        loaded = 0
+        for market_dir in model_dir.iterdir():
+            if not market_dir.is_dir():
+                continue
+            # Find most recent model file
+            model_files = sorted(market_dir.glob("model_*.pkl"), reverse=True)
+            if not model_files:
+                continue
+            market = market_dir.name.replace("_", "-")
+            self.predictor.load_model(market, model_files[0])
+            loaded += 1
+        return loaded
 
     async def stop(self) -> None:
         await self._save_state()
