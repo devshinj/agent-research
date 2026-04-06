@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from src.config.settings import Settings
 from src.repository.candle_repo import CandleRepository
 from src.repository.database import Database
 from src.repository.order_repo import OrderRepository
@@ -14,17 +14,25 @@ from src.repository.portfolio_repo import PortfolioRepository
 from src.repository.signal_repo import SignalRepository
 from src.runtime.event_bus import EventBus
 from src.runtime.scheduler import Scheduler
-from src.service.collector import Collector
+from src.service.candle_builder import CandleBuilder
 from src.service.features import FeatureBuilder
 from src.service.paper_engine import PaperEngine
 from src.service.portfolio import PortfolioManager
 from src.service.predictor import Predictor
 from src.service.risk_manager import RiskManager
 from src.service.screener import Screener
+from src.service.signal_debouncer import SignalDebouncer
+from src.service.tick_stream import TickStream
 from src.service.trainer import Trainer
 from src.service.upbit_client import UpbitClient
-from src.types.events import ScreenedCoinsEvent, SignalEvent, TradeEvent
-from src.types.models import Candle, PaperAccount
+from src.types.enums import SignalType
+from src.types.events import NewCandleEvent, ScreenedCoinsEvent, SignalEvent, TradeEvent
+from src.types.models import Candle, PaperAccount, Signal
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from src.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,20 +53,25 @@ class App:
 
         # Services
         self.upbit = UpbitClient()
-        self.collector = Collector(
-            self.upbit, self.candle_repo,
-            settings.collector.candle_timeframe, settings.collector.max_candles_per_market,
+        self.tick_stream = TickStream(
+            max_markets=settings.tick_stream.max_markets,
+            reconnect_max_seconds=settings.tick_stream.reconnect_max_seconds,
         )
+        self.candle_builder = CandleBuilder(self.event_bus)
         self.screener = Screener(settings.screening)
         self.feature_builder = FeatureBuilder()
         self.predictor = Predictor(self.feature_builder, float(settings.strategy.min_confidence))
+        self.signal_debouncer = SignalDebouncer(
+            confirm_seconds=settings.strategy.signal_confirm_seconds,
+            min_confidence=float(settings.strategy.signal_confirm_min_confidence),
+        )
         self.risk_manager = RiskManager(settings.risk, settings.paper_trading)
         self.paper_engine = PaperEngine(settings.paper_trading)
         self.portfolio_manager = PortfolioManager(settings.risk)
         self.trainer = Trainer(
             self.feature_builder,
             settings.data.model_dir,
-            settings.strategy.lookahead_minutes,
+            settings.strategy.lookahead_seconds,
             float(settings.strategy.threshold_pct),
         )
 
@@ -69,6 +82,8 @@ class App:
             positions={},
         )
         self.screened_markets: list[str] = []
+        self._all_markets: list[str] = []
+        self._korean_names: dict[str, str] = {}
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -80,7 +95,7 @@ class App:
         ])
 
     async def start(self) -> None:
-        logger.info("Starting Crypto Paper Trader...")
+        logger.info("Starting Crypto Paper Trader (tick-based)...")
         await self.db.initialize()
 
         # Restore persisted state
@@ -100,6 +115,7 @@ class App:
             logger.info("Restored risk state — %s", saved_risk)
 
         # Wire event handlers
+        self.event_bus.subscribe(NewCandleEvent, self._on_new_candle)
         self.event_bus.subscribe(SignalEvent, self._on_signal)
         self.event_bus.subscribe(TradeEvent, self._on_trade)
 
@@ -107,29 +123,29 @@ class App:
         loaded = await self._load_existing_models()
         logger.info("Loaded %d existing models", loaded)
 
-        # Initial data
-        await self.collector.refresh_markets()
-
-        # Initial screening + model training
+        # Fetch market list and screen
+        markets, korean_names = await self.upbit.fetch_markets()
+        self._all_markets = markets
+        self._korean_names = korean_names
         await self._refresh_screening()
-        await self._train_missing_models()
+
+        # Start tick stream
+        self.tick_stream.on_tick = self.candle_builder.on_trade
+        if self.screened_markets:
+            await self.tick_stream.start(self.screened_markets)
 
         # Schedule periodic tasks
-        self.scheduler.schedule_interval(
-            "collect_candles", self._collect_and_predict,
-            interval_seconds=60,
-        )
         self.scheduler.schedule_interval(
             "refresh_screening", self._refresh_screening,
             interval_seconds=self.settings.screening.refresh_interval_min * 60,
         )
         self.scheduler.schedule_interval(
-            "refresh_markets", self.collector.refresh_markets,
-            interval_seconds=self.settings.collector.market_refresh_interval_min * 60,
-        )
-        self.scheduler.schedule_interval(
             "retrain_models", self._retrain,
             interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
+        )
+        self.scheduler.schedule_interval(
+            "cleanup_candles", self._cleanup_old_candles,
+            interval_seconds=3600,
         )
 
         logger.info("App started. Seed: %s KRW", self.settings.paper_trading.initial_balance)
@@ -156,23 +172,19 @@ class App:
 
     async def _train_missing_models(self) -> None:
         """Train models for screened markets that don't have a loaded model."""
-        timeframe = f"{self.settings.collector.candle_timeframe}m"
         for market in self.screened_markets:
             if market in self.predictor._models:
                 continue
-            candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
-            if len(candles) < 200:
+            candles = await self.candle_repo.get_latest(market, "1s", limit=5000)
+            if len(candles) < 1200:
                 logger.info("Not enough candles for %s: %d", market, len(candles))
                 continue
 
             df = self._candles_to_df(candles)
-
             result = self.trainer.train(market, df)
             if result["model_path"] is not None:
                 self.predictor.load_model(market, result["model_path"])
                 logger.info("Trained and loaded model for %s (accuracy: %.3f)", market, result["accuracy"])
-            else:
-                logger.info("Training skipped for %s: insufficient valid samples", market)
 
     async def _retrain(self) -> None:
         """Retrain models for all screened markets."""
@@ -180,15 +192,13 @@ class App:
             return
 
         logger.info("Starting periodic retrain for %d markets", len(self.screened_markets))
-        timeframe = f"{self.settings.collector.candle_timeframe}m"
         trained = 0
         for market in self.screened_markets:
-            candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
-            if len(candles) < 200:
+            candles = await self.candle_repo.get_latest(market, "1s", limit=5000)
+            if len(candles) < 1200:
                 continue
 
             df = self._candles_to_df(candles)
-
             result = self.trainer.train(market, df)
             if result["model_path"] is not None:
                 self.predictor.load_model(market, result["model_path"])
@@ -198,6 +208,7 @@ class App:
 
     async def stop(self) -> None:
         await self._save_state()
+        await self.tick_stream.stop()
         await self.scheduler.cancel_all()
         await self.upbit.close()
         await self.db.close()
@@ -206,6 +217,7 @@ class App:
     async def reset(self, new_settings: Settings) -> None:
         """Reset trading data and reinitialize with new settings."""
         self.paused = True
+        await self.tick_stream.stop()
         await self.db.reset_trading_data()
 
         self.settings = new_settings
@@ -214,10 +226,14 @@ class App:
         self.portfolio_manager = PortfolioManager(new_settings.risk)
         self.screener = Screener(new_settings.screening)
         self.predictor = Predictor(self.feature_builder, float(new_settings.strategy.min_confidence))
+        self.signal_debouncer = SignalDebouncer(
+            confirm_seconds=new_settings.strategy.signal_confirm_seconds,
+            min_confidence=float(new_settings.strategy.signal_confirm_min_confidence),
+        )
         self.trainer = Trainer(
             self.feature_builder,
             new_settings.data.model_dir,
-            new_settings.strategy.lookahead_minutes,
+            new_settings.strategy.lookahead_seconds,
             float(new_settings.strategy.threshold_pct),
         )
 
@@ -228,43 +244,61 @@ class App:
         self.paused = False
 
     async def _refresh_screening(self) -> None:
-        tickers = await self.upbit.fetch_tickers(self.collector.markets)
-        results = self.screener.screen(tickers, self.collector.korean_names)
-        self.screened_markets = [r.market for r in results]
+        tickers = await self.upbit.fetch_tickers(self._all_markets)
+        results = self.screener.screen(tickers, self._korean_names)
+        old_markets = self.screened_markets
+        self.screened_markets = [r.market for r in results][: self.settings.tick_stream.max_markets]
         await self.event_bus.publish(ScreenedCoinsEvent(results, 0))
-        logger.info("Screened %d coins: %s", len(results), self.screened_markets)
+        logger.info("Screened %d coins, tracking: %s", len(results), self.screened_markets)
 
-    async def _collect_and_predict(self) -> None:
-        if self.paused or not self.screened_markets:
+        # Update tick stream subscription if markets changed
+        if self.screened_markets != old_markets and self.tick_stream._running:
+            await self.tick_stream.update_markets(self.screened_markets)
+
+    async def _on_new_candle(self, event: NewCandleEvent) -> None:
+        """Handle completed candles — predict on 1s candles, save all to DB."""
+        candle = event.candle
+
+        # Save all candles to DB
+        await self.candle_repo.save(candle)
+
+        # Only predict on 1s candles
+        if candle.timeframe != "1s" or self.paused:
             return
 
-        await self.collector.collect_candles(self.screened_markets)
+        market = candle.market
+        candles = self.candle_builder.get_recent(market, "1s", limit=300)
+        if len(candles) < 60:
+            return
 
-        for market in self.screened_markets:
-            candles = await self.candle_repo.get_latest(
-                market, f"{self.settings.collector.candle_timeframe}m"
+        df = self._candles_to_df(candles)
+
+        try:
+            signal = self.predictor.predict(market, df)
+            await self.signal_repo.save(
+                signal.market, signal.signal_type.name,
+                signal.confidence, signal.timestamp,
             )
-            if len(candles) < 60:
-                continue
 
-            df = self._candles_to_df(candles)
-
-            try:
-                signal = self.predictor.predict(market, df)
-                await self.signal_repo.save(
-                    signal.market, signal.signal_type.name,
-                    signal.confidence, signal.timestamp,
-                )
+            confirmed = self.signal_debouncer.on_raw_signal(signal)
+            if confirmed is not None:
                 await self.event_bus.publish(SignalEvent(
-                    signal.market, signal.signal_type, signal.confidence, signal.timestamp,
+                    confirmed.market, confirmed.signal_type,
+                    confirmed.confidence, confirmed.timestamp,
                 ))
-            except KeyError:
-                pass  # model not loaded
+        except KeyError:
+            pass  # model not loaded
+
+    async def _cleanup_old_candles(self) -> None:
+        """Delete candles older than retention window."""
+        retention_seconds = self.settings.tick_stream.candle_retention_hours * 3600
+        cutoff = int(time.time()) - retention_seconds
+        deleted = await self.candle_repo.delete_older_than(cutoff)
+        if deleted:
+            logger.info("Cleaned up %d old candles", deleted)
 
     async def _on_signal(self, event: SignalEvent) -> None:
-        from src.types.enums import SignalType
-
-        signal_model = __import__("src.types.models", fromlist=["Signal"]).Signal(
+        signal_model = Signal(
             event.market, event.signal_type, event.confidence, event.timestamp,
         )
         approved, reason = self.risk_manager.approve(signal_model, self.account)
