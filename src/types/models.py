@@ -79,12 +79,3 @@ class DailySummary:
     win_trades: int
     loss_trades: int
     max_drawdown_pct: Decimal
-
-
-@dataclass(frozen=True)
-class Trade:
-    market: str
-    price: Decimal
-    volume: Decimal
-    timestamp: int
-    ask_bid: str  # "ASK" or "BID"

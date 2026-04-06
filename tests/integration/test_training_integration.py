@@ -10,7 +10,7 @@ from src.service.predictor import Predictor
 from src.types.enums import SignalType
 
 
-def make_candle_df(n: int = 1500) -> pd.DataFrame:
+def make_candle_df(n: int = 600) -> pd.DataFrame:
     np.random.seed(42)
     close = 50000000 + np.cumsum(np.random.randn(n) * 100000)
     return pd.DataFrame({
@@ -25,13 +25,13 @@ def make_candle_df(n: int = 1500) -> pd.DataFrame:
 def test_train_then_predict(tmp_path):
     """Trainer produces a model that Predictor can use to generate signals."""
     fb = FeatureBuilder()
-    trainer = Trainer(fb, str(tmp_path), lookahead_seconds=5, threshold_pct=0.3)
+    trainer = Trainer(fb, str(tmp_path), lookahead_minutes=5, threshold_pct=0.3)
     predictor = Predictor(fb, min_confidence=0.0)
 
-    df = make_candle_df(1500)
+    df = make_candle_df(600)
     result = trainer.train("KRW-BTC", df)
 
-    assert result["model_path"] is not None, "Training should succeed with 1500 candles"
+    assert result["model_path"] is not None, "Training should succeed with 600 candles"
     assert result["accuracy"] > 0
 
     predictor.load_model("KRW-BTC", result["model_path"])
@@ -44,8 +44,8 @@ def test_train_then_predict(tmp_path):
 def test_model_persisted_and_reloadable(tmp_path):
     """Model saved by Trainer can be loaded by a fresh Predictor instance."""
     fb = FeatureBuilder()
-    trainer = Trainer(fb, str(tmp_path), lookahead_seconds=5, threshold_pct=0.3)
-    df = make_candle_df(1500)
+    trainer = Trainer(fb, str(tmp_path), 5, 0.3)
+    df = make_candle_df(600)
     result = trainer.train("KRW-BTC", df)
 
     # Fresh predictor loads the saved model

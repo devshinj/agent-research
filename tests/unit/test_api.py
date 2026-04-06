@@ -24,7 +24,7 @@ async def test_dashboard_summary(client):
     data = resp.json()
     assert "total_equity" in data
     assert "cash_balance" in data
-    assert "daily_pnl" in data
+    assert "total_pnl" in data
 
 
 async def test_portfolio_positions(client):
@@ -98,7 +98,7 @@ async def test_get_config(client):
     assert "risk" in data
     assert "screening" in data
     assert "strategy" in data
-    assert "tick_stream" in data
+    assert "collector" in data
     assert "data" in data
 
 
@@ -151,17 +151,15 @@ async def test_reset(client):
             "always_include": ["KRW-BTC"],
         },
         "strategy": {
-            "lookahead_seconds": 30,
+            "lookahead_minutes": 5,
             "threshold_pct": 0.3,
             "retrain_interval_hours": 6,
             "min_confidence": 0.6,
-            "signal_confirm_seconds": 3,
-            "signal_confirm_min_confidence": 0.7,
         },
-        "tick_stream": {
-            "max_markets": 3,
-            "reconnect_max_seconds": 30,
-            "candle_retention_hours": 24,
+        "collector": {
+            "candle_timeframe": 1,
+            "max_candles_per_market": 200,
+            "market_refresh_interval_min": 60,
         },
         "data": {
             "db_path": "data/paper_trader.db",

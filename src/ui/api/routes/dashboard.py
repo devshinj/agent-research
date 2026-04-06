@@ -10,7 +10,7 @@ async def get_markets(request: Request) -> list[dict[str, str]]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
-    names = app._korean_names
+    names = app.collector.korean_names
     return [
         {"market": m, "korean_name": names.get(m, m.replace("KRW-", ""))}
         for m in app.screened_markets
@@ -23,7 +23,7 @@ async def get_candles(request: Request, market: str, limit: int = 200) -> list[d
     if app is None:
         return []
 
-    timeframe = "1s"
+    timeframe = f"{app.settings.collector.candle_timeframe}m"
     candles = await app.candle_repo.get_latest(market, timeframe, limit=limit)
 
     return [

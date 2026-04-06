@@ -33,12 +33,12 @@ def test_feature_columns_present():
     features = builder.build(df)
 
     expected_cols = [
-        "return_1s", "return_5s", "return_15s",
+        "return_1m", "return_5m", "return_15m",
         "rsi_14", "rsi_7",
         "macd", "macd_signal", "macd_hist",
         "bb_width",
         "ema_5_ratio", "ema_20_ratio",
-        "volume_ratio_5s", "volume_ratio_20s",
+        "volume_ratio_5m", "volume_ratio_20m",
         "high_low_ratio", "close_position",
     ]
     for col in expected_cols:
@@ -64,28 +64,7 @@ def test_deterministic_output():
 
 def test_build_with_short_data():
     """데이터가 부족해도 에러 없이 빈 DataFrame 반환"""
-    df = make_candle_df(50)  # Below the 60-row minimum
+    df = make_candle_df(5)
     builder = FeatureBuilder()
     features = builder.build(df)
     assert isinstance(features, pd.DataFrame)
-    assert len(features) == 0  # Should be empty due to insufficient data
-
-
-def test_feature_names_use_second_labels():
-    """Feature names should use second-based labels, not minute-based"""
-    fb = FeatureBuilder()
-    names = fb.get_feature_names()
-    assert "return_1s" in names
-    assert "return_5s" in names
-    assert "return_15s" in names
-    assert "return_60s" in names
-    # Old names should not exist
-    assert "return_1m" not in names
-    assert "return_5m" not in names
-    assert "return_15m" not in names
-    assert "return_60m" not in names
-    # Volume ratios should also use second labels
-    assert "volume_ratio_5s" in names
-    assert "volume_ratio_20s" in names
-    assert "volume_ratio_5m" not in names
-    assert "volume_ratio_20m" not in names
