@@ -21,12 +21,12 @@ class Trainer:
         self,
         feature_builder: FeatureBuilder,
         model_dir: str,
-        lookahead_minutes: int,
+        lookahead_seconds: int,
         threshold_pct: float,
     ) -> None:
         self._fb = feature_builder
         self._model_dir = Path(model_dir)
-        self._lookahead = lookahead_minutes
+        self._lookahead = lookahead_seconds
         self._threshold = threshold_pct
 
     def _create_labels(self, df: pd.DataFrame) -> pd.Series:
@@ -51,7 +51,7 @@ class Trainer:
         features = features[valid_mask]
         labels = labels[valid_mask]
 
-        if len(features) < 100:
+        if len(features) < 1000:
             logger.warning("Not enough valid samples for %s: %d", market, len(features))
             return {"accuracy": 0, "model_path": None}
 
