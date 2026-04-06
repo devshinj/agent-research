@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
-from decimal import Decimal
 from collections.abc import Sequence
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -27,7 +28,7 @@ from src.service.screener import Screener
 from src.service.trainer import Trainer
 from src.service.upbit_client import UpbitClient
 from src.types.events import ScreenedCoinsEvent, SignalEvent, TradeEvent
-from src.types.models import Candle, PaperAccount
+from src.types.models import Candle, DailySummary, PaperAccount
 
 logger = logging.getLogger(__name__)
 
@@ -269,33 +270,33 @@ class App:
         new_strategy = self.settings.strategy
 
         if "risk" in patches:
-            coerced = {}
+            coerced: dict[str, Any] = {}
             for k, v in patches["risk"].items():
                 field_type = next(
                     f.type for f in dataclasses.fields(type(new_risk)) if f.name == k
                 )
-                coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(v)
+                coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(str(v))
             new_risk = dataclasses.replace(new_risk, **coerced)
             updated["risk"] = list(patches["risk"].keys())
 
         if "screening" in patches:
-            coerced = {}
+            s_coerced: dict[str, Any] = {}
             for k, v in patches["screening"].items():
                 if k == "always_include":
-                    coerced[k] = tuple(v) if isinstance(v, list) else v
+                    s_coerced[k] = tuple(v) if isinstance(v, list) else v
                 else:
                     field_type = next(
                         f.type for f in dataclasses.fields(type(new_screening)) if f.name == k
                     )
-                    coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(v)
-            new_screening = dataclasses.replace(new_screening, **coerced)
+                    s_coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(str(v))
+            new_screening = dataclasses.replace(new_screening, **s_coerced)
             updated["screening"] = list(patches["screening"].keys())
 
         if "strategy" in patches:
-            coerced = {}
+            st_coerced: dict[str, Any] = {}
             for k, v in patches["strategy"].items():
-                coerced[k] = Decimal(str(v))
-            new_strategy = dataclasses.replace(new_strategy, **coerced)
+                st_coerced[k] = Decimal(str(v))
+            new_strategy = dataclasses.replace(new_strategy, **st_coerced)
             updated["strategy"] = list(patches["strategy"].keys())
 
         self.settings = dataclasses.replace(
@@ -396,3 +397,52 @@ class App:
     async def _save_state(self) -> None:
         await self.portfolio_repo.save_account(self.account)
         await self.portfolio_repo.save_risk_state(self.risk_manager.dump_state())
+        await self._snapshot_daily_summary()
+
+    async def _snapshot_daily_summary(self) -> None:
+        """Upsert today's equity snapshot into daily_summary."""
+        from datetime import date as date_cls
+
+        today = date_cls.today().isoformat()
+
+        # Compute current total equity
+        current_prices: dict[str, Decimal] = {}
+        if self.account.positions:
+            tickers = await self.upbit.fetch_tickers(list(self.account.positions.keys()))
+            for t in tickers:
+                current_prices[t["market"]] = t["price"]
+        total_equity = self.portfolio_manager.calculate_total_equity(
+            self.account, current_prices,
+        )
+
+        # Load existing summary to preserve starting_balance & accumulate stats
+        existing = await self.portfolio_repo.get_daily_summary(today)
+        starting = existing.starting_balance if existing else total_equity
+        realized = existing.realized_pnl if existing else Decimal(0)
+        total_trades = existing.total_trades if existing else 0
+        win_trades = existing.win_trades if existing else 0
+        loss_trades = existing.loss_trades if existing else 0
+
+        # Update trade counts from last order
+        risk_state = self.risk_manager.dump_state()
+        total_trades = int(risk_state["daily_trades"])
+
+        # Max drawdown: track worst intraday dip from starting balance
+        drawdown_pct = (
+            (starting - total_equity) / starting * 100
+            if starting > 0 else Decimal(0)
+        )
+        prev_max = existing.max_drawdown_pct if existing else Decimal(0)
+        max_drawdown = max(drawdown_pct, prev_max)
+
+        summary = DailySummary(
+            date=today,
+            starting_balance=starting,
+            ending_balance=total_equity,
+            realized_pnl=realized,
+            total_trades=total_trades,
+            win_trades=win_trades,
+            loss_trades=loss_trades,
+            max_drawdown_pct=max_drawdown,
+        )
+        await self.portfolio_repo.save_daily_summary(summary)

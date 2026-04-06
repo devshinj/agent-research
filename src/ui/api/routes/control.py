@@ -65,7 +65,7 @@ async def patch_config(request: Request) -> dict[str, Any]:
     try:
         updated_fields = app.hot_reload(body)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from None
 
     # Persist to YAML
     app.settings.to_yaml(_CONFIG_PATH)
