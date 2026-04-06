@@ -116,8 +116,11 @@ def test_position_size_limited_by_cash():
     size = rm.calculate_position_size(account)
     # total_equity = 1,000,000 + 10,000,000 = 11,000,000
     # max_amount = 11,000,000 * 0.25 = 2,750,000
-    # min(cash=1,000,000, max=2,750,000) = 1,000,000
-    assert size == Decimal("1000000")
+    # safe_cash = floor(1,000,000 / (1.0005 * 1.0005)) = 999,000
+    # min(safe_cash=999,000, max=2,750,000) = 999,000
+    assert size == Decimal("999000")
+    # Ensures invest amount + slippage + fee never exceeds cash_balance
+    assert size <= account.cash_balance
 
 
 def test_reject_below_min_order():

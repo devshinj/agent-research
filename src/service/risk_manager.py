@@ -65,8 +65,13 @@ class RiskManager:
             p.entry_price * p.quantity for p in account.positions.values()
         )
         max_amount = total_equity * self._pt.max_position_pct
+        # Reserve room for slippage + fee so total cost never exceeds cash
+        overhead = (Decimal("1") + self._pt.slippage_rate) * (Decimal("1") + self._pt.fee_rate)
+        safe_cash = (account.cash_balance / overhead).to_integral_value(
+            rounding=ROUND_DOWN,
+        )
         # Truncate to integer KRW — real exchanges never settle fractional won
-        return min(account.cash_balance, max_amount).to_integral_value(
+        return min(safe_cash, max_amount).to_integral_value(
             rounding=ROUND_DOWN,
         )
 

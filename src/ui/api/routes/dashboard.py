@@ -47,8 +47,10 @@ async def get_summary(request: Request) -> dict:
             "total_equity": "10000000",
             "cash_balance": "10000000",
             "daily_pnl": "0",
+            "total_pnl": "0",
             "total_return_pct": "0",
             "open_positions": 0,
+            "initial_balance": "10000000",
         }
 
     account = app.account
@@ -66,10 +68,24 @@ async def get_summary(request: Request) -> dict:
     else:
         total_return_pct = 0
 
+    # Total unrealized PnL = equity - initial_balance
+    total_pnl = total_equity - account.initial_balance
+
+    # Truncate KRW values to integers — real exchanges never settle fractional won
+    from decimal import ROUND_DOWN
+    total_equity_int = total_equity.to_integral_value(rounding=ROUND_DOWN)
+    cash_int = account.cash_balance.to_integral_value(rounding=ROUND_DOWN)
+    pnl_int = daily_pnl.to_integral_value(rounding=ROUND_DOWN)
+    total_pnl_int = total_pnl.to_integral_value(rounding=ROUND_DOWN)
+
+    initial_int = account.initial_balance.to_integral_value(rounding=ROUND_DOWN)
+
     return {
-        "total_equity": str(total_equity),
-        "cash_balance": str(account.cash_balance),
-        "daily_pnl": str(daily_pnl),
+        "total_equity": str(total_equity_int),
+        "cash_balance": str(cash_int),
+        "daily_pnl": str(pnl_int),
+        "total_pnl": str(total_pnl_int),
         "total_return_pct": str(total_return_pct),
         "open_positions": len(account.positions),
+        "initial_balance": str(initial_int),
     }

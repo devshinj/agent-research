@@ -94,9 +94,10 @@ class Database:
         self._conn: aiosqlite.Connection | None = None
 
     async def initialize(self) -> None:
-        self._conn = await aiosqlite.connect(self._db_path)
+        self._conn = await aiosqlite.connect(self._db_path, isolation_level=None)
         await self._conn.executescript(SCHEMA_SQL)
-        await self._conn.commit()
+        await self._conn.execute("PRAGMA journal_mode=WAL")
+        await self._conn.execute("PRAGMA busy_timeout=5000")
 
     @property
     def conn(self) -> aiosqlite.Connection:

@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "../hooks/useApi";
+
+const REFRESH_INTERVAL_MS = 30_000;
 
 interface ScreeningResult {
   market: string;
@@ -32,6 +34,7 @@ interface ModelStatus {
   models: Record<string, ModelInfo>;
   last_retrain: string | null;
   next_retrain_hours: number | null;
+  training: Record<string, number>;
 }
 
 type SortKey = "volume_krw" | "volatility_pct" | "score";
@@ -45,11 +48,18 @@ export default function Strategy() {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  useEffect(() => {
+  const refreshAll = useCallback(() => {
     get<ScreeningResult[]>("/api/strategy/screening").then(setScreening);
     get<Signal[]>("/api/strategy/signals").then(setSignals);
     get<ModelStatus>("/api/strategy/model-status").then(setModelStatus);
   }, [get]);
+
+  // Initial load + polling every 30s (including model-status for training state)
+  useEffect(() => {
+    refreshAll();
+    const id = setInterval(refreshAll, REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [refreshAll]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -73,6 +83,9 @@ export default function Strategy() {
   const modelEntries = modelStatus
     ? Object.entries(modelStatus.models)
     : [];
+
+  const trainingMarkets = modelStatus?.training ?? {};
+  const trainingCount = Object.keys(trainingMarkets).length;
 
   return (
     <div>
@@ -186,6 +199,11 @@ export default function Strategy() {
         <div className="panel-header">
           <h3>모델 상태</h3>
           <div style={{ display: "flex", gap: 8 }}>
+            {trainingCount > 0 && (
+              <span className="badge warn" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>
+                학습 중: {trainingCount}개 마켓
+              </span>
+            )}
             {modelStatus?.next_retrain_hours != null && (
               <span className="badge info">
                 다음 학습: {modelStatus.next_retrain_hours}h
@@ -199,7 +217,7 @@ export default function Strategy() {
           </div>
         </div>
         <div className="panel-body">
-          {modelEntries.length === 0 ? (
+          {modelEntries.length === 0 && trainingCount === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">&#9881;</div>
               <div className="empty-text">
@@ -208,15 +226,39 @@ export default function Strategy() {
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 }}>
+              {/* Cards for markets currently training without an existing model */}
+              {Object.entries(trainingMarkets)
+                .filter(([m]) => !modelStatus?.models[m])
+                .map(([market, elapsed]) => (
+                  <div key={market} className="card" style={{ opacity: 0.85 }}>
+                    <div className="label">{market}</div>
+                    <div className="value" style={{ fontSize: 16, color: "var(--warn)" }}>
+                      <span style={{ animation: "pulse 1.5s ease-in-out infinite", display: "inline-block" }}>
+                        학습 중...
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 8, fontFamily: "var(--font-mono)" }}>
+                      경과: {Math.floor(elapsed)}초
+                    </div>
+                  </div>
+                ))}
               {modelEntries.map(([name, info]) => {
                 const total = info.total_signals || 0;
                 const buyPct = total > 0 ? (info.buy_count / total) * 100 : 0;
                 const sellPct = total > 0 ? (info.sell_count / total) * 100 : 0;
                 const holdPct = total > 0 ? (info.hold_count / total) * 100 : 0;
+                const isTraining = name in trainingMarkets;
 
                 return (
                   <div key={name} className="card">
-                    <div className="label">{name}</div>
+                    <div className="label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {name}
+                      {isTraining && (
+                        <span className="badge warn" style={{ fontSize: 10, padding: "1px 6px", animation: "pulse 1.5s ease-in-out infinite" }}>
+                          재학습 중 ({Math.floor(trainingMarkets[name])}초)
+                        </span>
+                      )}
+                    </div>
                     <div className="value" style={{ fontSize: 20 }}>
                       {(info.accuracy * 100).toFixed(1)}%
                     </div>

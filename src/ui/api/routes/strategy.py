@@ -118,8 +118,15 @@ async def get_model_status(request: Request) -> dict[str, Any]:
         remaining_s = next_retrain_epoch - int(time.time())
         next_retrain_hours = round(max(0, remaining_s / 3600), 1)
 
+    # Training-in-progress info
+    now = time.time()
+    training: dict[str, float] = {}
+    for market, started_at in app.training_in_progress.items():
+        training[market] = round(now - started_at, 1)
+
     return {
         "models": models,
         "last_retrain": formatted_retrain,
         "next_retrain_hours": next_retrain_hours,
+        "training": training,
     }

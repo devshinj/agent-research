@@ -3,21 +3,24 @@ import { useApi } from "../hooks/useApi";
 
 interface Position {
   market: string;
-  side: string;
+  korean_name: string;
   quantity: string;
   avg_price: string;
   current_price: string;
   unrealized_pnl: string;
   pnl_pct: string;
+  eval_amount: string;
 }
 
 interface HistoryItem {
   id: string;
+  filled_at: number;
   market: string;
+  korean_name: string;
   side: string;
   quantity: string;
   price: string;
-  filled_at: string;
+  total_amount: string;
 }
 
 interface HistoryPage {
@@ -27,8 +30,21 @@ interface HistoryPage {
   total: number;
 }
 
-const formatKRW = (val: string) =>
-  `\u20A9${Number(val).toLocaleString("ko-KR")}`;
+const formatKRW = (val: string | undefined | null) => {
+  if (val == null) return "\u20A90";
+  const n = Number(val);
+  if (Number.isNaN(n)) return "\u20A90";
+  return `\u20A9${Math.floor(n).toLocaleString("ko-KR")}`;
+};
+
+const formatQty = (val: string) => Number(val).toFixed(8);
+
+const formatTime = (ts: number | null | undefined) => {
+  if (!ts) return "-";
+  const d = new Date(ts * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
 
 const pnlBadge = (pct: string) => {
   const n = Number(pct);
@@ -77,25 +93,22 @@ export default function Portfolio() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>마켓</th>
-                <th>매매구분</th>
-                <th>수량</th>
-                <th>평균단가</th>
+                <th>마켓명</th>
+                <th>보유 평단가</th>
                 <th>현재가</th>
-                <th>미실현 손익</th>
-                <th>%</th>
+                <th>손익</th>
+                <th>수익률</th>
+                <th>구매 수량</th>
+                <th>평가 금액</th>
               </tr>
             </thead>
             <tbody>
               {positions.map((p) => (
                 <tr key={p.market}>
-                  <td style={{ color: "var(--text)", fontWeight: 600 }}>{p.market}</td>
-                  <td>
-                    <span className={`badge ${p.side === "BUY" ? "profit" : "loss"}`}>
-                      {p.side}
-                    </span>
+                  <td style={{ color: "var(--text)", fontWeight: 600 }}>
+                    {p.korean_name}
+                    <span style={{ fontSize: "0.8em", opacity: 0.5, marginLeft: 6 }}>{p.market}</span>
                   </td>
-                  <td>{p.quantity}</td>
                   <td>{formatKRW(p.avg_price)}</td>
                   <td>{formatKRW(p.current_price)}</td>
                   <td style={{ color: Number(p.unrealized_pnl) >= 0 ? "var(--profit)" : "var(--loss)" }}>
@@ -103,9 +116,11 @@ export default function Portfolio() {
                   </td>
                   <td>
                     <span className={`badge ${pnlBadge(p.pnl_pct)}`}>
-                      {Number(p.pnl_pct) > 0 ? "+" : ""}{p.pnl_pct}%
+                      {Number(p.pnl_pct) > 0 ? "+" : ""}{Number(p.pnl_pct).toFixed(2)}%
                     </span>
                   </td>
+                  <td>{formatQty(p.quantity)}</td>
+                  <td>{formatKRW(p.eval_amount)}</td>
                 </tr>
               ))}
             </tbody>
@@ -135,25 +150,30 @@ export default function Portfolio() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>시간</th>
-                  <th>마켓</th>
-                  <th>매매구분</th>
+                  <th>거래 시간</th>
+                  <th>마켓명</th>
+                  <th>매매 구분</th>
                   <th>수량</th>
-                  <th>체결가</th>
+                  <th>체결 단가</th>
+                  <th>총 거래 금액</th>
                 </tr>
               </thead>
               <tbody>
                 {history.items.map((h) => (
                   <tr key={h.id}>
-                    <td>{h.filled_at}</td>
-                    <td style={{ color: "var(--text)", fontWeight: 600 }}>{h.market}</td>
+                    <td>{formatTime(h.filled_at)}</td>
+                    <td style={{ color: "var(--text)", fontWeight: 600 }}>
+                      {h.korean_name}
+                      <span style={{ fontSize: "0.8em", opacity: 0.5, marginLeft: 6 }}>{h.market}</span>
+                    </td>
                     <td>
                       <span className={`badge ${h.side === "BUY" ? "profit" : "loss"}`}>
-                        {h.side}
+                        {h.side === "BUY" ? "매수" : "매도"}
                       </span>
                     </td>
-                    <td>{h.quantity}</td>
+                    <td>{formatQty(h.quantity)}</td>
                     <td>{formatKRW(h.price)}</td>
+                    <td>{formatKRW(h.total_amount)}</td>
                   </tr>
                 ))}
               </tbody>
