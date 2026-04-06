@@ -127,7 +127,7 @@ function formatDisplay(section: string, key: string, value: unknown): string {
   if (key === "always_include" && Array.isArray(value)) return value.join(", ");
   if (key === "initial_balance" || key === "min_order_krw")
     return `\u20A9${Number(value).toLocaleString()}`;
-  if (key === "min_volume_krw") return `\u20A9${(Number(value) / 1e6).toFixed(0)}M`;
+  if (key === "min_volume_krw") return `\u20A9${Number(value).toLocaleString()}`;
   if (key.endsWith("_pct") && section !== "screening")
     return `${(Number(value) * 100).toFixed(2)}%`;
   if (key.endsWith("_pct") && section === "screening") return `${value}%`;
