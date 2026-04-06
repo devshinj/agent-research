@@ -77,6 +77,10 @@ class Settings:
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
 
+        return Settings.from_dict(raw)
+
+    @staticmethod
+    def from_dict(raw: dict) -> Settings:
         return Settings(
             paper_trading=PaperTradingConfig(
                 initial_balance=Decimal(str(raw["paper_trading"]["initial_balance"])),
@@ -122,3 +126,56 @@ class Settings:
                 stale_order_days=int(raw["data"]["stale_order_days"]),
             ),
         )
+
+    def to_dict(self) -> dict:
+        """Return settings as a plain dict (for JSON API responses)."""
+        return {
+            "paper_trading": {
+                "initial_balance": int(self.paper_trading.initial_balance),
+                "max_position_pct": float(self.paper_trading.max_position_pct),
+                "max_open_positions": self.paper_trading.max_open_positions,
+                "fee_rate": float(self.paper_trading.fee_rate),
+                "slippage_rate": float(self.paper_trading.slippage_rate),
+                "min_order_krw": self.paper_trading.min_order_krw,
+            },
+            "risk": {
+                "stop_loss_pct": float(self.risk.stop_loss_pct),
+                "take_profit_pct": float(self.risk.take_profit_pct),
+                "trailing_stop_pct": float(self.risk.trailing_stop_pct),
+                "max_daily_loss_pct": float(self.risk.max_daily_loss_pct),
+                "max_daily_trades": self.risk.max_daily_trades,
+                "consecutive_loss_limit": self.risk.consecutive_loss_limit,
+                "cooldown_minutes": self.risk.cooldown_minutes,
+            },
+            "screening": {
+                "min_volume_krw": int(self.screening.min_volume_krw),
+                "min_volatility_pct": float(self.screening.min_volatility_pct),
+                "max_volatility_pct": float(self.screening.max_volatility_pct),
+                "max_coins": self.screening.max_coins,
+                "refresh_interval_min": self.screening.refresh_interval_min,
+                "always_include": list(self.screening.always_include),
+            },
+            "strategy": {
+                "lookahead_minutes": self.strategy.lookahead_minutes,
+                "threshold_pct": float(self.strategy.threshold_pct),
+                "retrain_interval_hours": self.strategy.retrain_interval_hours,
+                "min_confidence": float(self.strategy.min_confidence),
+            },
+            "collector": {
+                "candle_timeframe": self.collector.candle_timeframe,
+                "max_candles_per_market": self.collector.max_candles_per_market,
+                "market_refresh_interval_min": self.collector.market_refresh_interval_min,
+            },
+            "data": {
+                "db_path": self.data.db_path,
+                "model_dir": self.data.model_dir,
+                "stale_candle_days": self.data.stale_candle_days,
+                "stale_model_days": self.data.stale_model_days,
+                "stale_order_days": self.data.stale_order_days,
+            },
+        }
+
+    def to_yaml(self, path: Path) -> None:
+        data = self.to_dict()
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)

@@ -201,6 +201,30 @@ class App:
         await self.db.close()
         logger.info("App stopped.")
 
+    async def reset(self, new_settings: Settings) -> None:
+        """Reset trading data and reinitialize with new settings."""
+        self.paused = True
+        await self.db.reset_trading_data()
+
+        self.settings = new_settings
+        self.risk_manager = RiskManager(new_settings.risk, new_settings.paper_trading)
+        self.paper_engine = PaperEngine(new_settings.paper_trading)
+        self.portfolio_manager = PortfolioManager(new_settings.risk)
+        self.screener = Screener(new_settings.screening)
+        self.predictor = Predictor(self.feature_builder, float(new_settings.strategy.min_confidence))
+        self.trainer = Trainer(
+            self.feature_builder,
+            new_settings.data.model_dir,
+            new_settings.strategy.lookahead_minutes,
+            float(new_settings.strategy.threshold_pct),
+        )
+
+        self.account = PaperAccount(
+            initial_balance=new_settings.paper_trading.initial_balance,
+            cash_balance=new_settings.paper_trading.initial_balance,
+        )
+        self.paused = False
+
     async def _refresh_screening(self) -> None:
         tickers = await self.upbit.fetch_tickers(self.collector.markets)
         results = self.screener.screen(tickers, self.collector.korean_names)
@@ -232,7 +256,6 @@ class App:
                 pass  # 모델 미로드
 
     async def _on_signal(self, event: SignalEvent) -> None:
-
         from src.types.enums import SignalType
 
         signal_model = __import__("src.types.models", fromlist=["Signal"]).Signal(
