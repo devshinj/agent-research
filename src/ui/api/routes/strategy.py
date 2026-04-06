@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Request
 
@@ -9,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/screening")
-async def get_screening(request: Request) -> list:
+async def get_screening(request: Request) -> list[dict[str, Any]]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
@@ -34,7 +35,7 @@ async def get_screening(request: Request) -> list:
 @router.get("/signals")
 async def get_signals(
     request: Request, limit: int = 50, include_hold: bool = False,
-) -> list:
+) -> list[dict[str, Any]]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
@@ -54,7 +55,7 @@ async def get_signals(
 
 
 @router.get("/model-status")
-async def get_model_status(request: Request) -> dict:
+async def get_model_status(request: Request) -> dict[str, Any]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"models": {}, "last_retrain": None, "next_retrain_hours": None}
