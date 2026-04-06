@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from src.types.models import Candle, Trade
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
