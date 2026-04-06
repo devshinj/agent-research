@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
 
-from src.types.events import NewCandleEvent
 from src.types.models import Candle, Trade
-
-if TYPE_CHECKING:
-    from src.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +63,8 @@ class _CandleAccumulator:
 
 
 class CandleBuilder:
-    def __init__(self, event_bus: EventBus) -> None:
-        self._bus = event_bus
+    def __init__(self, on_candle: Callable[[Candle], Awaitable[None]]) -> None:
+        self._on_candle = on_candle
         # Completed candles: (market, timeframe) -> deque[Candle]
         self._completed: dict[tuple[str, str], deque[Candle]] = {}
         # In-progress time-based candles: (market, timeframe) -> _CandleAccumulator
@@ -127,7 +123,7 @@ class CandleBuilder:
             maxlen = _DEQUE_LIMITS.get(candle.timeframe, 1000)
             self._completed[key] = deque(maxlen=maxlen)
         self._completed[key].append(candle)
-        await self._bus.publish(NewCandleEvent(candle))
+        await self._on_candle(candle)
 
     def get_recent(self, market: str, timeframe: str, limit: int) -> list[Candle]:
         key = (market, timeframe)

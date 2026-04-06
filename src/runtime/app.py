@@ -57,7 +57,9 @@ class App:
             max_markets=settings.tick_stream.max_markets,
             reconnect_max_seconds=settings.tick_stream.reconnect_max_seconds,
         )
-        self.candle_builder = CandleBuilder(self.event_bus)
+        self.candle_builder = CandleBuilder(
+            on_candle=lambda c: self.event_bus.publish(NewCandleEvent(c))
+        )
         self.screener = Screener(settings.screening)
         self.feature_builder = FeatureBuilder()
         self.predictor = Predictor(self.feature_builder, float(settings.strategy.min_confidence))
