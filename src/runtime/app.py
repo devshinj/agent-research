@@ -389,7 +389,9 @@ class App:
             return
 
         if event.signal_type == SignalType.BUY:
-            invest = self.risk_manager.calculate_position_size(self.account)
+            invest = self.risk_manager.calculate_position_size(
+                self.account, Decimal(str(event.confidence)),
+            )
             tickers = await self.upbit.fetch_tickers([event.market])
             if not tickers:
                 return

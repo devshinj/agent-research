@@ -55,7 +55,7 @@ def test_reject_when_max_positions_reached():
     assert "포지션 한도" in reason
 
 
-def test_reject_duplicate_buy():
+def test_allow_duplicate_buy():
     rm = RiskManager(make_risk_config(), make_pt_config())
     positions = {
         "KRW-BTC": Position(
@@ -66,8 +66,7 @@ def test_reject_duplicate_buy():
     account = make_account("7500000", positions)
     signal = Signal("KRW-BTC", SignalType.BUY, 0.8, 1700000000)
     approved, reason = rm.approve(signal, account)
-    assert approved is False
-    assert "이미 보유" in reason
+    assert approved is True
 
 
 def test_reject_on_circuit_breaker():

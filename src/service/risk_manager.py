@@ -48,30 +48,33 @@ class RiskManager:
         if len(account.positions) >= self._pt.max_open_positions:
             return False, "포지션 한도 도달"
 
-        if signal.market in account.positions:
-            return False, f"{signal.market} 이미 보유 중 — 중복 매수 불가"
-
         # [4] 최소 주문 금액
-        invest_amount = self.calculate_position_size(account)
+        invest_amount = self.calculate_position_size(
+            account, Decimal(str(signal.confidence)),
+        )
         if invest_amount < self._pt.min_order_krw:
             return False, f"최소 주문 금액({self._pt.min_order_krw}원) 미달"
 
         return True, "OK"
 
-    def calculate_position_size(self, account: PaperAccount) -> Decimal:
+    def calculate_position_size(
+        self, account: PaperAccount, confidence: Decimal = Decimal("1"),
+    ) -> Decimal:
         from decimal import ROUND_DOWN
 
         total_equity = account.cash_balance + sum(
             p.entry_price * p.quantity for p in account.positions.values()
         )
         max_amount = total_equity * self._pt.max_position_pct
+        # Scale by signal confidence: higher confidence → larger position
+        scaled_amount = max_amount * confidence
         # Reserve room for slippage + fee so total cost never exceeds cash
         overhead = (Decimal("1") + self._pt.slippage_rate) * (Decimal("1") + self._pt.fee_rate)
         safe_cash = (account.cash_balance / overhead).to_integral_value(
             rounding=ROUND_DOWN,
         )
         # Truncate to integer KRW — real exchanges never settle fractional won
-        return min(safe_cash, max_amount).to_integral_value(
+        return min(safe_cash, scaled_amount).to_integral_value(
             rounding=ROUND_DOWN,
         )
 

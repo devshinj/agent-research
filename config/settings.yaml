@@ -1,31 +1,30 @@
 paper_trading:
-  initial_balance: 5000000
-  max_position_pct: 0.25
-  max_open_positions: 4
+  initial_balance: 100000000
+  max_position_pct: 0.2
+  max_open_positions: 10
   fee_rate: 0.0005
   slippage_rate: 0.0005
-  min_order_krw: 5000
+  min_order_krw: 10000
 risk:
   stop_loss_pct: 0.02
   take_profit_pct: 0.08
   trailing_stop_pct: 0.015
   max_daily_loss_pct: 0.05
-  max_daily_trades: 50
-  consecutive_loss_limit: 5
+  max_daily_trades: 500
+  consecutive_loss_limit: 20
   cooldown_minutes: 60
 screening:
   min_volume_krw: 500000000
   min_volatility_pct: 1.0
   max_volatility_pct: 15.0
-  max_coins: 5
-  refresh_interval_min: 30
-  always_include:
-  - KRW-BTC
+  max_coins: 50
+  refresh_interval_min: 10
+  always_include: []
 strategy:
-  lookahead_minutes: 5
-  threshold_pct: 0.3
-  retrain_interval_hours: 6
-  min_confidence: 0.6
+  lookahead_minutes: 1
+  threshold_pct: 0.2
+  retrain_interval_hours: 1
+  min_confidence: 0.7
 collector:
   candle_timeframe: 1
   max_candles_per_market: 200
