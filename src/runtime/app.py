@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import logging
+from decimal import Decimal
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -30,11 +33,24 @@ logger = logging.getLogger(__name__)
 
 
 class App:
+    HOT_RELOAD_FIELDS: dict[str, set[str]] = {
+        "risk": {
+            "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
+            "max_daily_trades", "consecutive_loss_limit", "cooldown_minutes",
+        },
+        "strategy": {"min_confidence"},
+        "screening": {
+            "min_volume_krw", "min_volatility_pct", "max_volatility_pct",
+            "max_coins", "always_include",
+        },
+    }
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.event_bus = EventBus()
         self.scheduler = Scheduler()
         self.paused = False
+        self._db_lock = asyncio.Lock()
 
         # Infrastructure
         self.db = Database(settings.data.db_path)
@@ -157,16 +173,19 @@ class App:
     async def _train_missing_models(self) -> None:
         """Train models for screened markets that don't have a loaded model."""
         timeframe = f"{self.settings.collector.candle_timeframe}m"
-        for market in self.screened_markets:
-            if market in self.predictor._models:
-                continue
-            candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
-            if len(candles) < 200:
-                logger.info("Not enough candles for %s: %d", market, len(candles))
-                continue
+        pending: dict[str, pd.DataFrame] = {}
 
-            df = self._candles_to_df(candles)
+        async with self._db_lock:
+            for market in self.screened_markets:
+                if market in self.predictor._models:
+                    continue
+                candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
+                if len(candles) < 200:
+                    logger.info("Not enough candles for %s: %d", market, len(candles))
+                    continue
+                pending[market] = self._candles_to_df(candles)
 
+        for market, df in pending.items():
             result = self.trainer.train(market, df)
             if result["model_path"] is not None:
                 self.predictor.load_model(market, result["model_path"])
@@ -182,13 +201,16 @@ class App:
         logger.info("Starting periodic retrain for %d markets", len(self.screened_markets))
         timeframe = f"{self.settings.collector.candle_timeframe}m"
         trained = 0
-        for market in self.screened_markets:
-            candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
-            if len(candles) < 200:
-                continue
 
-            df = self._candles_to_df(candles)
+        async with self._db_lock:
+            candle_data: dict[str, pd.DataFrame] = {}
+            for market in self.screened_markets:
+                candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
+                if len(candles) < 200:
+                    continue
+                candle_data[market] = self._candles_to_df(candles)
 
+        for market, df in candle_data.items():
             result = self.trainer.train(market, df)
             if result["model_path"] is not None:
                 self.predictor.load_model(market, result["model_path"])
@@ -227,6 +249,72 @@ class App:
         )
         self.paused = False
 
+    def hot_reload(self, patches: dict[str, dict[str, object]]) -> dict[str, list[str]]:
+        """Apply partial config update without resetting trading state."""
+        for section, fields in patches.items():
+            allowed = self.HOT_RELOAD_FIELDS.get(section)
+            if allowed is None:
+                bad = ", ".join(f"{section}.{k}" for k in fields)
+                raise ValueError(f"핫 리로드 불가 필드: {bad} — 완전 초기화를 사용하세요")
+            for key in fields:
+                if key not in allowed:
+                    raise ValueError(
+                        f"핫 리로드 불가 필드: {section}.{key} — 완전 초기화를 사용하세요"
+                    )
+
+        updated: dict[str, list[str]] = {}
+
+        new_risk = self.settings.risk
+        new_screening = self.settings.screening
+        new_strategy = self.settings.strategy
+
+        if "risk" in patches:
+            coerced = {}
+            for k, v in patches["risk"].items():
+                field_type = next(
+                    f.type for f in dataclasses.fields(type(new_risk)) if f.name == k
+                )
+                coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(v)
+            new_risk = dataclasses.replace(new_risk, **coerced)
+            updated["risk"] = list(patches["risk"].keys())
+
+        if "screening" in patches:
+            coerced = {}
+            for k, v in patches["screening"].items():
+                if k == "always_include":
+                    coerced[k] = tuple(v) if isinstance(v, list) else v
+                else:
+                    field_type = next(
+                        f.type for f in dataclasses.fields(type(new_screening)) if f.name == k
+                    )
+                    coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(v)
+            new_screening = dataclasses.replace(new_screening, **coerced)
+            updated["screening"] = list(patches["screening"].keys())
+
+        if "strategy" in patches:
+            coerced = {}
+            for k, v in patches["strategy"].items():
+                coerced[k] = Decimal(str(v))
+            new_strategy = dataclasses.replace(new_strategy, **coerced)
+            updated["strategy"] = list(patches["strategy"].keys())
+
+        self.settings = dataclasses.replace(
+            self.settings,
+            risk=new_risk,
+            screening=new_screening,
+            strategy=new_strategy,
+        )
+
+        if "risk" in patches:
+            self.risk_manager.update_config(new_risk)
+            self.portfolio_manager._risk = new_risk
+        if "strategy" in patches:
+            self.predictor.update_min_confidence(float(new_strategy.min_confidence))
+        if "screening" in patches:
+            self.screener.update_config(new_screening)
+
+        return updated
+
     async def _refresh_screening(self) -> None:
         tickers = await self.upbit.fetch_tickers(self.collector.markets)
         results = self.screener.screen(tickers, self.collector.korean_names)
@@ -238,28 +326,29 @@ class App:
         if self.paused or not self.screened_markets:
             return
 
-        await self.collector.collect_candles(self.screened_markets)
+        async with self._db_lock:
+            await self.collector.collect_candles(self.screened_markets)
 
-        for market in self.screened_markets:
-            candles = await self.candle_repo.get_latest(
-                market, f"{self.settings.collector.candle_timeframe}m"
-            )
-            if len(candles) < 60:
-                continue
-
-            df = self._candles_to_df(candles)
-
-            try:
-                signal = self.predictor.predict(market, df)
-                await self.signal_repo.save(
-                    signal.market, signal.signal_type.name,
-                    signal.confidence, signal.timestamp,
+            for market in self.screened_markets:
+                candles = await self.candle_repo.get_latest(
+                    market, f"{self.settings.collector.candle_timeframe}m"
                 )
-                await self.event_bus.publish(SignalEvent(
-                    signal.market, signal.signal_type, signal.confidence, signal.timestamp,
-                ))
-            except KeyError:
-                pass  # model not loaded
+                if len(candles) < 60:
+                    continue
+
+                df = self._candles_to_df(candles)
+
+                try:
+                    signal = self.predictor.predict(market, df)
+                    await self.signal_repo.save(
+                        signal.market, signal.signal_type.name,
+                        signal.confidence, signal.timestamp,
+                    )
+                    await self.event_bus.publish(SignalEvent(
+                        signal.market, signal.signal_type, signal.confidence, signal.timestamp,
+                    ))
+                except KeyError:
+                    pass  # model not loaded
 
     async def _on_signal(self, event: SignalEvent) -> None:
         from src.types.enums import SignalType

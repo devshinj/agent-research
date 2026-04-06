@@ -85,3 +85,99 @@ def test_screener_update_config():
     s.update_config(new_config)
 
     assert s._config.max_coins == 5
+
+
+import dataclasses
+
+from src.config.settings import Settings, StrategyConfig, CollectorConfig, DataConfig
+
+
+def _make_settings() -> Settings:
+    return Settings(
+        paper_trading=_make_pt_config(),
+        risk=_make_risk_config(),
+        screening=_make_screening_config(),
+        strategy=StrategyConfig(
+            lookahead_minutes=5,
+            threshold_pct=Decimal("0.3"),
+            retrain_interval_hours=6,
+            min_confidence=Decimal("0.6"),
+        ),
+        collector=CollectorConfig(
+            candle_timeframe=1,
+            max_candles_per_market=200,
+            market_refresh_interval_min=60,
+        ),
+        data=DataConfig(
+            db_path=":memory:",
+            model_dir="data/models",
+            stale_candle_days=7,
+            stale_model_days=30,
+            stale_order_days=90,
+        ),
+    )
+
+
+def test_hot_reload_updates_risk():
+    """hot_reload with risk field updates risk_manager config."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+    app.risk_manager._consecutive_losses = 3
+
+    updated = app.hot_reload({"risk": {"stop_loss_pct": 0.05}})
+
+    assert app.settings.risk.stop_loss_pct == Decimal("0.05")
+    assert app.risk_manager._risk.stop_loss_pct == Decimal("0.05")
+    assert app.risk_manager._consecutive_losses == 3
+    assert "risk" in updated
+    assert "stop_loss_pct" in updated["risk"]
+
+
+def test_hot_reload_updates_min_confidence():
+    """hot_reload with strategy.min_confidence updates predictor."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    app.hot_reload({"strategy": {"min_confidence": 0.8}})
+
+    assert app.predictor._min_confidence == 0.8
+    assert app.settings.strategy.min_confidence == Decimal("0.8")
+
+
+def test_hot_reload_updates_screening():
+    """hot_reload with screening fields updates screener config."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    app.hot_reload({"screening": {"max_coins": 5}})
+
+    assert app.screener._config.max_coins == 5
+    assert app.settings.screening.max_coins == 5
+
+
+def test_hot_reload_rejects_forbidden_field():
+    """hot_reload raises ValueError for non-hot-reloadable fields."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    with pytest.raises(ValueError, match="핫 리로드 불가"):
+        app.hot_reload({"paper_trading": {"initial_balance": 10000000}})
+
+
+def test_hot_reload_rejects_forbidden_section():
+    """hot_reload raises ValueError for entirely forbidden sections."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    with pytest.raises(ValueError, match="핫 리로드 불가"):
+        app.hot_reload({"collector": {"candle_timeframe": 5}})
