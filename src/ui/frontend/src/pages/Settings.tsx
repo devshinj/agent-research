@@ -133,6 +133,7 @@ const HOT_RELOAD_FIELDS: Record<string, Set<string>> = {
     "min_volume_krw", "min_volatility_pct", "max_volatility_pct",
     "max_coins", "always_include",
   ]),
+  paper_trading: new Set(["max_position_pct", "max_open_positions"]),
 };
 
 function isHotReloadable(section: string, key: string): boolean {
@@ -491,7 +492,7 @@ export default function Settings() {
         >
           <div
             style={{
-              background: "var(--card)",
+              background: "var(--bg-card)",
               border: "1px solid var(--border)",
               borderRadius: 12,
               padding: 32,
