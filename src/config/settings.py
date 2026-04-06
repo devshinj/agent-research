@@ -42,17 +42,19 @@ class ScreeningConfig:
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    lookahead_minutes: int
+    lookahead_seconds: int
     threshold_pct: Decimal
     retrain_interval_hours: int
     min_confidence: Decimal
+    signal_confirm_seconds: int
+    signal_confirm_min_confidence: Decimal
 
 
 @dataclass(frozen=True)
-class CollectorConfig:
-    candle_timeframe: int
-    max_candles_per_market: int
-    market_refresh_interval_min: int
+class TickStreamConfig:
+    max_markets: int
+    reconnect_max_seconds: int
+    candle_retention_hours: int
 
 
 @dataclass(frozen=True)
@@ -70,7 +72,7 @@ class Settings:
     risk: RiskConfig
     screening: ScreeningConfig
     strategy: StrategyConfig
-    collector: CollectorConfig
+    tick_stream: TickStreamConfig
     data: DataConfig
 
     @staticmethod
@@ -109,15 +111,17 @@ class Settings:
                 always_include=tuple(raw["screening"].get("always_include", [])),
             ),
             strategy=StrategyConfig(
-                lookahead_minutes=int(raw["strategy"]["lookahead_minutes"]),
+                lookahead_seconds=int(raw["strategy"]["lookahead_seconds"]),
                 threshold_pct=Decimal(str(raw["strategy"]["threshold_pct"])),
                 retrain_interval_hours=int(raw["strategy"]["retrain_interval_hours"]),
                 min_confidence=Decimal(str(raw["strategy"]["min_confidence"])),
+                signal_confirm_seconds=int(raw["strategy"]["signal_confirm_seconds"]),
+                signal_confirm_min_confidence=Decimal(str(raw["strategy"]["signal_confirm_min_confidence"])),
             ),
-            collector=CollectorConfig(
-                candle_timeframe=int(raw["collector"]["candle_timeframe"]),
-                max_candles_per_market=int(raw["collector"]["max_candles_per_market"]),
-                market_refresh_interval_min=int(raw["collector"]["market_refresh_interval_min"]),
+            tick_stream=TickStreamConfig(
+                max_markets=int(raw["tick_stream"]["max_markets"]),
+                reconnect_max_seconds=int(raw["tick_stream"]["reconnect_max_seconds"]),
+                candle_retention_hours=int(raw["tick_stream"]["candle_retention_hours"]),
             ),
             data=DataConfig(
                 db_path=str(raw["data"]["db_path"]),
@@ -157,15 +161,17 @@ class Settings:
                 "always_include": list(self.screening.always_include),
             },
             "strategy": {
-                "lookahead_minutes": self.strategy.lookahead_minutes,
+                "lookahead_seconds": self.strategy.lookahead_seconds,
                 "threshold_pct": float(self.strategy.threshold_pct),
                 "retrain_interval_hours": self.strategy.retrain_interval_hours,
                 "min_confidence": float(self.strategy.min_confidence),
+                "signal_confirm_seconds": self.strategy.signal_confirm_seconds,
+                "signal_confirm_min_confidence": float(self.strategy.signal_confirm_min_confidence),
             },
-            "collector": {
-                "candle_timeframe": self.collector.candle_timeframe,
-                "max_candles_per_market": self.collector.max_candles_per_market,
-                "market_refresh_interval_min": self.collector.market_refresh_interval_min,
+            "tick_stream": {
+                "max_markets": self.tick_stream.max_markets,
+                "reconnect_max_seconds": self.tick_stream.reconnect_max_seconds,
+                "candle_retention_hours": self.tick_stream.candle_retention_hours,
             },
             "data": {
                 "db_path": self.data.db_path,
