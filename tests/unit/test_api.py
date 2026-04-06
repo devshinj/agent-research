@@ -84,3 +84,66 @@ async def test_reset_trading_data():
     assert row[0] == 0  # was empty, still exists
 
     await db.close()
+
+
+async def test_get_config(client):
+    resp = await client.get("/api/control/config")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "paper_trading" in data
+    assert "risk" in data
+    assert "screening" in data
+    assert "strategy" in data
+    assert "collector" in data
+    assert "data" in data
+
+
+async def test_reset(client):
+    resp = await client.post("/api/control/reset", json={
+        "paper_trading": {
+            "initial_balance": 5000000,
+            "max_position_pct": 0.25,
+            "max_open_positions": 4,
+            "fee_rate": 0.0005,
+            "slippage_rate": 0.0005,
+            "min_order_krw": 5000,
+        },
+        "risk": {
+            "stop_loss_pct": 0.02,
+            "take_profit_pct": 0.05,
+            "trailing_stop_pct": 0.015,
+            "max_daily_loss_pct": 0.05,
+            "max_daily_trades": 50,
+            "consecutive_loss_limit": 5,
+            "cooldown_minutes": 60,
+        },
+        "screening": {
+            "min_volume_krw": 500000000,
+            "min_volatility_pct": 1.0,
+            "max_volatility_pct": 15.0,
+            "max_coins": 10,
+            "refresh_interval_min": 30,
+            "always_include": ["KRW-BTC"],
+        },
+        "strategy": {
+            "lookahead_minutes": 5,
+            "threshold_pct": 0.3,
+            "retrain_interval_hours": 6,
+            "min_confidence": 0.6,
+        },
+        "collector": {
+            "candle_timeframe": 1,
+            "max_candles_per_market": 200,
+            "market_refresh_interval_min": 60,
+        },
+        "data": {
+            "db_path": "data/paper_trader.db",
+            "model_dir": "data/models",
+            "stale_candle_days": 7,
+            "stale_model_days": 30,
+            "stale_order_days": 90,
+        },
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "running"
