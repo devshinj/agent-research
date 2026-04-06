@@ -76,6 +76,15 @@ CREATE TABLE IF NOT EXISTS risk_state (
     current_day         TEXT NOT NULL,
     updated_at          INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS signals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    market      TEXT NOT NULL,
+    signal_type TEXT NOT NULL,
+    confidence  REAL NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    outcome     TEXT
+);
 """
 
 
@@ -103,6 +112,7 @@ class Database:
             "DELETE FROM account_state;"
             "DELETE FROM daily_summary;"
             "DELETE FROM risk_state;"
+            "DELETE FROM signals;"
         )
         await self.conn.commit()
 

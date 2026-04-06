@@ -67,13 +67,17 @@ async def test_reset_trading_data():
         "INSERT INTO risk_state (id, consecutive_losses, cooldown_until, daily_loss, daily_trades, current_day, updated_at) "
         "VALUES (1, 3, 0, '100000', 5, '2026-04-06', 100)"
     )
+    await db.conn.execute(
+        "INSERT INTO signals (market, signal_type, confidence, timestamp) "
+        "VALUES ('KRW-BTC', 'BUY', 0.75, 1700000000)"
+    )
     await db.conn.commit()
 
     # Reset
     await db.reset_trading_data()
 
     # Verify all trading tables are empty
-    for table in ("orders", "positions", "account_state", "daily_summary", "risk_state"):
+    for table in ("orders", "positions", "account_state", "daily_summary", "risk_state", "signals"):
         cursor = await db.conn.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
         row = await cursor.fetchone()
         assert row[0] == 0, f"{table} should be empty after reset"
