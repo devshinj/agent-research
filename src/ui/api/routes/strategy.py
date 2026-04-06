@@ -15,11 +15,11 @@ async def get_screening(request: Request) -> list[dict[str, Any]]:
     if app is None:
         return []
 
-    if not app.screened_markets or not app.collector.markets:
+    if not app.screened_markets or not app._all_markets:
         return []
 
-    tickers = await app.upbit.fetch_tickers(app.collector.markets)
-    results = app.screener.screen(tickers, app.collector.korean_names)
+    tickers = await app.upbit.fetch_tickers(app._all_markets)
+    results = app.screener.screen(tickers, app._korean_names)
     return [
         {
             "market": r.market,

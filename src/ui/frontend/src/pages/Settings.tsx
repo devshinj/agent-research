@@ -30,15 +30,17 @@ type ConfigValues = {
     always_include: string[];
   };
   strategy: {
-    lookahead_minutes: number;
+    lookahead_seconds: number;
     threshold_pct: number;
     retrain_interval_hours: number;
     min_confidence: number;
+    signal_confirm_seconds: number;
+    signal_confirm_min_confidence: number;
   };
-  collector: {
-    candle_timeframe: number;
-    max_candles_per_market: number;
-    market_refresh_interval_min: number;
+  tick_stream: {
+    max_markets: number;
+    reconnect_max_seconds: number;
+    candle_retention_hours: number;
   };
   data: {
     db_path: string;
@@ -95,19 +97,21 @@ const FIELD_META: {
     section: "strategy",
     label: "전략",
     fields: [
-      { key: "lookahead_minutes", label: "예측 시간", type: "number", suffix: "분" },
+      { key: "lookahead_seconds", label: "예측 시간", type: "number", suffix: "초" },
       { key: "threshold_pct", label: "임계값", type: "number" },
       { key: "retrain_interval_hours", label: "재학습 주기", type: "number", suffix: "시간" },
       { key: "min_confidence", label: "최소 신뢰도", type: "number" },
+      { key: "signal_confirm_seconds", label: "신호 확인 시간", type: "number", suffix: "초" },
+      { key: "signal_confirm_min_confidence", label: "신호 확인 최소 신뢰도", type: "number" },
     ],
   },
   {
-    section: "collector",
-    label: "수집",
+    section: "tick_stream",
+    label: "틱 스트림",
     fields: [
-      { key: "candle_timeframe", label: "캔들 주기", type: "number", suffix: "분" },
-      { key: "max_candles_per_market", label: "마켓당 최대 캔들", type: "number" },
-      { key: "market_refresh_interval_min", label: "마켓 갱신 주기", type: "number", suffix: "분" },
+      { key: "max_markets", label: "최대 마켓 수", type: "number" },
+      { key: "reconnect_max_seconds", label: "재연결 최대 시간", type: "number", suffix: "초" },
+      { key: "candle_retention_hours", label: "캔들 보존 시간", type: "number", suffix: "시간" },
     ],
   },
   {

@@ -9,7 +9,7 @@ from src.service.features import FeatureBuilder
 from src.types.enums import SignalType
 
 
-def make_data(n=500):
+def make_data(n=1500):
     np.random.seed(42)
     close = 50000000 + np.cumsum(np.random.randn(n) * 100000)
     return pd.DataFrame({
@@ -24,7 +24,7 @@ def make_data(n=500):
 @pytest.fixture
 def trained_model(tmp_path):
     fb = FeatureBuilder()
-    trainer = Trainer(fb, str(tmp_path), 5, 0.3)
+    trainer = Trainer(fb, str(tmp_path), lookahead_seconds=5, threshold_pct=0.3)
     df = make_data()
     result = trainer.train("KRW-BTC", df)
     return result["model_path"]
