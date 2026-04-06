@@ -13,5 +13,14 @@ export function useApi() {
     return resp.json();
   }, []);
 
-  return { get, post };
+  const postJson = useCallback(async <T>(path: string, body: unknown): Promise<T> => {
+    const resp = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return resp.json();
+  }, []);
+
+  return { get, post, postJson };
 }
