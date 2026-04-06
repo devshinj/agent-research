@@ -29,7 +29,10 @@ def test_ws_message_type_values() -> None:
     assert WSMessageType.TRADE_EXECUTED.value == "trade_executed"
 
 
-from src.types.models import Candle, Order, PaperAccount, Position, Signal, DailySummary
+import pytest
+from dataclasses import FrozenInstanceError
+
+from src.types.models import Candle, Order, PaperAccount, Position, Signal, DailySummary, Trade
 
 
 def test_candle_creation() -> None:
@@ -112,3 +115,22 @@ def test_daily_summary_creation() -> None:
         max_drawdown_pct=Decimal("0.015"),
     )
     assert ds.win_trades == 8
+
+
+def test_trade_creation() -> None:
+    trade = Trade(
+        market="KRW-BTC",
+        price=Decimal("50000000"),
+        volume=Decimal("0.001"),
+        timestamp=1700000000,
+        ask_bid="BID",
+    )
+    assert trade.market == "KRW-BTC"
+    assert trade.price == Decimal("50000000")
+    assert trade.ask_bid == "BID"
+
+
+def test_trade_is_frozen() -> None:
+    trade = Trade("KRW-BTC", Decimal("50000000"), Decimal("0.001"), 1700000000, "ASK")
+    with pytest.raises(FrozenInstanceError):
+        trade.price = Decimal("0")
