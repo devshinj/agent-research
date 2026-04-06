@@ -181,3 +181,16 @@ def test_hot_reload_rejects_forbidden_section():
 
     with pytest.raises(ValueError, match="핫 리로드 불가"):
         app.hot_reload({"collector": {"candle_timeframe": 5}})
+
+
+def test_paper_engine_update_config():
+    from src.service.paper_engine import PaperEngine
+
+    engine = PaperEngine(_make_pt_config())
+    assert engine._config.max_position_pct == Decimal("0.25")
+
+    new_config = _make_pt_config(max_position_pct=Decimal("0.5"))
+    engine.update_config(new_config)
+
+    assert engine._config.max_position_pct == Decimal("0.5")
+    assert engine._config.max_open_positions == 4  # unchanged fields preserved
