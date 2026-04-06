@@ -194,3 +194,32 @@ def test_paper_engine_update_config():
 
     assert engine._config.max_position_pct == Decimal("0.5")
     assert engine._config.max_open_positions == 4  # unchanged fields preserved
+
+
+def test_hot_reload_updates_paper_trading():
+    """hot_reload with paper_trading fields updates PaperEngine and RiskManager."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    updated = app.hot_reload({"paper_trading": {"max_position_pct": 0.5, "max_open_positions": 8}})
+
+    assert app.settings.paper_trading.max_position_pct == Decimal("0.5")
+    assert app.settings.paper_trading.max_open_positions == 8
+    assert app.paper_engine._config.max_position_pct == Decimal("0.5")
+    assert app.risk_manager._pt.max_position_pct == Decimal("0.5")
+    assert "paper_trading" in updated
+    assert "max_position_pct" in updated["paper_trading"]
+    assert "max_open_positions" in updated["paper_trading"]
+
+
+def test_hot_reload_rejects_forbidden_paper_trading_field():
+    """hot_reload raises ValueError for non-allowed paper_trading fields."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    with pytest.raises(ValueError, match="핫 리로드 불가"):
+        app.hot_reload({"paper_trading": {"initial_balance": 999999}})

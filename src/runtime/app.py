@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import time
 from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -44,6 +45,7 @@ class App:
             "min_volume_krw", "min_volatility_pct", "max_volatility_pct",
             "max_coins", "always_include",
         },
+        "paper_trading": {"max_position_pct", "max_open_positions"},
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -86,6 +88,7 @@ class App:
             positions={},
         )
         self.screened_markets: list[str] = []
+        self.training_in_progress: dict[str, float] = {}  # market -> start epoch
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -187,12 +190,16 @@ class App:
                 pending[market] = self._candles_to_df(candles)
 
         for market, df in pending.items():
-            result = self.trainer.train(market, df)
-            if result["model_path"] is not None:
-                self.predictor.load_model(market, result["model_path"])
-                logger.info("Trained and loaded model for %s (accuracy: %.3f)", market, result["accuracy"])
-            else:
-                logger.info("Training skipped for %s: insufficient valid samples", market)
+            self.training_in_progress[market] = time.time()
+            try:
+                result = self.trainer.train(market, df)
+                if result["model_path"] is not None:
+                    self.predictor.load_model(market, result["model_path"])
+                    logger.info("Trained and loaded model for %s (accuracy: %.3f)", market, result["accuracy"])
+                else:
+                    logger.info("Training skipped for %s: insufficient valid samples", market)
+            finally:
+                self.training_in_progress.pop(market, None)
 
     async def _retrain(self) -> None:
         """Retrain models for all screened markets."""
@@ -212,10 +219,14 @@ class App:
                 candle_data[market] = self._candles_to_df(candles)
 
         for market, df in candle_data.items():
-            result = self.trainer.train(market, df)
-            if result["model_path"] is not None:
-                self.predictor.load_model(market, result["model_path"])
-                trained += 1
+            self.training_in_progress[market] = time.time()
+            try:
+                result = self.trainer.train(market, df)
+                if result["model_path"] is not None:
+                    self.predictor.load_model(market, result["model_path"])
+                    trained += 1
+            finally:
+                self.training_in_progress.pop(market, None)
 
         logger.info("Retrain complete: %d/%d markets updated", trained, len(self.screened_markets))
 
@@ -268,6 +279,7 @@ class App:
         new_risk = self.settings.risk
         new_screening = self.settings.screening
         new_strategy = self.settings.strategy
+        new_pt = self.settings.paper_trading
 
         if "risk" in patches:
             coerced: dict[str, Any] = {}
@@ -299,11 +311,22 @@ class App:
             new_strategy = dataclasses.replace(new_strategy, **st_coerced)
             updated["strategy"] = list(patches["strategy"].keys())
 
+        if "paper_trading" in patches:
+            pt_coerced: dict[str, Any] = {}
+            for k, v in patches["paper_trading"].items():
+                field_type = next(
+                    f.type for f in dataclasses.fields(type(new_pt)) if f.name == k
+                )
+                pt_coerced[k] = Decimal(str(v)) if field_type == "Decimal" else int(str(v))
+            new_pt = dataclasses.replace(new_pt, **pt_coerced)
+            updated["paper_trading"] = list(patches["paper_trading"].keys())
+
         self.settings = dataclasses.replace(
             self.settings,
             risk=new_risk,
             screening=new_screening,
             strategy=new_strategy,
+            paper_trading=new_pt,
         )
 
         if "risk" in patches:
@@ -313,6 +336,9 @@ class App:
             self.predictor.update_min_confidence(float(new_strategy.min_confidence))
         if "screening" in patches:
             self.screener.update_config(new_screening)
+        if "paper_trading" in patches:
+            self.risk_manager._pt = new_pt
+            self.paper_engine.update_config(new_pt)
 
         return updated
 
