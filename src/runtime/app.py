@@ -259,6 +259,13 @@ class App:
             initial_balance=new_settings.paper_trading.initial_balance,
             cash_balance=new_settings.paper_trading.initial_balance,
         )
+
+        # Reload models from disk and retrain any missing ones
+        loaded = await self._load_existing_models()
+        logger.info("Reset: loaded %d existing models", loaded)
+        await self._refresh_screening()
+        await self._train_missing_models()
+
         self.paused = False
 
     def hot_reload(self, patches: dict[str, dict[str, object]]) -> dict[str, list[str]]:
