@@ -11,6 +11,7 @@ from src.repository.candle_repo import CandleRepository
 from src.repository.database import Database
 from src.repository.order_repo import OrderRepository
 from src.repository.portfolio_repo import PortfolioRepository
+from src.repository.signal_repo import SignalRepository
 from src.runtime.event_bus import EventBus
 from src.runtime.scheduler import Scheduler
 from src.service.collector import Collector
@@ -40,6 +41,7 @@ class App:
         self.candle_repo = CandleRepository(self.db)
         self.order_repo = OrderRepository(self.db)
         self.portfolio_repo = PortfolioRepository(self.db)
+        self.signal_repo = SignalRepository(self.db)
 
         # Services
         self.upbit = UpbitClient()
@@ -249,11 +251,15 @@ class App:
 
             try:
                 signal = self.predictor.predict(market, df)
+                await self.signal_repo.save(
+                    signal.market, signal.signal_type.name,
+                    signal.confidence, signal.timestamp,
+                )
                 await self.event_bus.publish(SignalEvent(
                     signal.market, signal.signal_type, signal.confidence, signal.timestamp,
                 ))
             except KeyError:
-                pass  # 모델 미로드
+                pass  # model not loaded
 
     async def _on_signal(self, event: SignalEvent) -> None:
         from src.types.enums import SignalType
