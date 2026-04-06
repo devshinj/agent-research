@@ -9,10 +9,66 @@ interface RiskStatus {
   cooldown_until: string | null;
 }
 
-export default function Risk() {
-  const { get } = useApi();
-  const [status, setStatus] = useState<RiskStatus | null>(null);
+interface ConfigValues {
+  risk: {
+    max_daily_loss_pct: number;
+    max_daily_trades: number;
+    consecutive_loss_limit: number;
+    cooldown_minutes: number;
+  };
+  paper_trading: {
+    max_position_pct: number;
+    max_open_positions: number;
+  };
+}
 
+interface SliderDef {
+  section: "risk" | "paper_trading";
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+}
+
+const SLIDERS: SliderDef[] = [
+  {
+    section: "risk", key: "max_daily_trades", label: "일일 최대 거래",
+    min: 10, max: 500, step: 10,
+    format: (v) => `${v}회`,
+  },
+  {
+    section: "risk", key: "consecutive_loss_limit", label: "연속 손실 한도",
+    min: 3, max: 20, step: 1,
+    format: (v) => `${v}회`,
+  },
+  {
+    section: "risk", key: "cooldown_minutes", label: "쿨다운 시간",
+    min: 5, max: 120, step: 5,
+    format: (v) => `${v}분`,
+  },
+  {
+    section: "paper_trading", key: "max_position_pct", label: "포지션 최대 비중",
+    min: 0.1, max: 1.0, step: 0.05,
+    format: (v) => `${(v * 100).toFixed(0)}%`,
+  },
+  {
+    section: "paper_trading", key: "max_open_positions", label: "동시 포지션 수",
+    min: 1, max: 10, step: 1,
+    format: (v) => `${v}개`,
+  },
+];
+
+export default function Risk() {
+  const { get, patchJson } = useApi();
+  const [status, setStatus] = useState<RiskStatus | null>(null);
+  const [config, setConfig] = useState<ConfigValues | null>(null);
+  const [form, setForm] = useState<Record<string, Record<string, number>>>({});
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  // Fetch risk status
   useEffect(() => {
     get<RiskStatus>("/api/risk/status").then(setStatus);
     const interval = setInterval(() => {
@@ -21,11 +77,81 @@ export default function Risk() {
     return () => clearInterval(interval);
   }, [get]);
 
+  // Fetch config
+  useEffect(() => {
+    get<ConfigValues>("/api/control/config").then((data) => {
+      setConfig(data);
+      setForm({
+        risk: { ...data.risk },
+        paper_trading: { ...data.paper_trading },
+      });
+    });
+  }, [get]);
+
+  const handleSlider = (section: string, key: string, value: number) => {
+    setForm((prev) => ({
+      ...prev,
+      [section]: { ...prev[section], [key]: value },
+    }));
+  };
+
+  const hasChanges = (): boolean => {
+    if (!config) return false;
+    return SLIDERS.some(({ section, key }) => {
+      const orig = (config[section] as Record<string, number>)[key];
+      return form[section]?.[key] !== orig;
+    });
+  };
+
+  const handleReset = () => {
+    if (!config) return;
+    setForm({
+      risk: { ...config.risk },
+      paper_trading: { ...config.paper_trading },
+    });
+  };
+
+  const handleApply = async () => {
+    if (!config) return;
+    setSaving(true);
+    setFeedback(null);
+
+    const patch: Record<string, Record<string, number>> = {};
+    for (const { section, key } of SLIDERS) {
+      const orig = (config[section] as Record<string, number>)[key];
+      const curr = form[section]?.[key];
+      if (curr !== undefined && curr !== orig) {
+        if (!patch[section]) patch[section] = {};
+        patch[section][key] = curr;
+      }
+    }
+
+    try {
+      const res = await patchJson<{ config: ConfigValues }>("/api/control/config", patch);
+      setConfig(res.config);
+      setForm({
+        risk: { ...res.config.risk },
+        paper_trading: { ...res.config.paper_trading },
+      });
+      setFeedback("적용 완료");
+      setTimeout(() => setFeedback(null), 3000);
+    } catch {
+      setFeedback("적용 실패");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Derive limits from config (with fallbacks matching settings.yaml defaults)
+  const dailyLossLimit = config?.risk.max_daily_loss_pct ?? 10;
+  const consecutiveLossLimit = form.risk?.consecutive_loss_limit ?? config?.risk.consecutive_loss_limit ?? 10;
+  const dailyTradesLimit = form.risk?.max_daily_trades ?? config?.risk.max_daily_trades ?? 200;
+
   if (!status) return <div className="loading">리스크 데이터 로딩 중...</div>;
 
   const lossLevel = Math.abs(Number(status.daily_loss_pct));
-  const lossBarWidth = Math.min(lossLevel / 5, 1) * 100; // 5% = full bar
-  const lossBarClass = lossLevel >= 4 ? "danger" : lossLevel >= 2 ? "warn" : "accent";
+  const lossBarWidth = Math.min(lossLevel / dailyLossLimit, 1) * 100;
+  const lossBarClass = lossLevel >= dailyLossLimit * 0.8 ? "danger" : lossLevel >= dailyLossLimit * 0.4 ? "warn" : "accent";
 
   const lossBars = 5;
   const activeBars = Math.min(status.consecutive_losses, lossBars);
@@ -106,7 +232,7 @@ export default function Risk() {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
               <span>0%</span>
-              <span>-5% 한도</span>
+              <span>-{dailyLossLimit}% 한도</span>
             </div>
           </div>
         </div>
@@ -115,7 +241,7 @@ export default function Risk() {
         <div className="card">
           <div className="label">연속 손실</div>
           <div className="value" style={{ fontSize: 20 }}>
-            {status.consecutive_losses} / 5
+            {status.consecutive_losses} / {consecutiveLossLimit}
           </div>
           <div style={{ marginTop: 12 }}>
             <div className="risk-meter">
@@ -139,45 +265,58 @@ export default function Risk() {
         <div className="card">
           <div className="label">일일 거래 횟수</div>
           <div className="value" style={{ fontSize: 20 }}>
-            {status.daily_trades} / 50
+            {status.daily_trades} / {dailyTradesLimit}
           </div>
           <div style={{ marginTop: 12 }}>
             <div className="progress-bar">
               <div
-                className={`fill ${status.daily_trades >= 40 ? "danger" : status.daily_trades >= 25 ? "warn" : "accent"}`}
-                style={{ width: `${(status.daily_trades / 50) * 100}%` }}
+                className={`fill ${status.daily_trades >= dailyTradesLimit * 0.8 ? "danger" : status.daily_trades >= dailyTradesLimit * 0.5 ? "warn" : "accent"}`}
+                style={{ width: `${(status.daily_trades / dailyTradesLimit) * 100}%` }}
               />
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
               <span>0</span>
-              <span>50 한도</span>
+              <span>{dailyTradesLimit} 한도</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Risk Rules ─────────────────────── */}
+      {/* ── Risk Sliders ──────────────────── */}
       <div className="panel">
         <div className="panel-header">
-          <h3>리스크 규칙</h3>
+          <h3>투자 성향 조절</h3>
+          {feedback && (
+            <span className={`badge ${feedback === "적용 완료" ? "profit" : "loss"}`}>
+              {feedback}
+            </span>
+          )}
         </div>
         <div className="panel-body">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontFamily: "var(--font-mono)", fontSize: 13 }}>
-            {[
-              ["손절매", "2.0%"],
-              ["익절매", "5.0%"],
-              ["추적 손절", "1.5%"],
-              ["일일 최대 손실", "5.0%"],
-              ["일일 최대 거래", "50"],
-              ["연속 손실 한도", "5"],
-              ["대기 시간", "60분"],
-              ["최대 포지션 비중", "25%"],
-            ].map(([rule, val]) => (
-              <div key={rule} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-dim)" }}>{rule}</span>
-                <span style={{ color: "var(--text)" }}>{val}</span>
+          {SLIDERS.map(({ section, key, label, min, max, step, format }) => (
+            <div key={key} className="slider-row">
+              <span className="slider-label">{label}</span>
+              <div className="slider-track">
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={form[section]?.[key] ?? min}
+                  onChange={(e) => handleSlider(section, key, Number(e.target.value))}
+                />
               </div>
-            ))}
+              <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
+            </div>
+          ))}
+
+          <div className="slider-buttons">
+            <button className="btn" onClick={handleReset} disabled={saving || !hasChanges()}>
+              초기화
+            </button>
+            <button className="btn btn-primary" onClick={handleApply} disabled={saving || !hasChanges()}>
+              {saving ? "적용 중..." : "적용"}
+            </button>
           </div>
         </div>
       </div>
