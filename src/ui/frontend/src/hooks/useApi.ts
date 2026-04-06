@@ -22,5 +22,15 @@ export function useApi() {
     return resp.json();
   }, []);
 
-  return { get, post, postJson };
+  const patchJson = useCallback(async <T>(url: string, body: unknown): Promise<T> => {
+    const res = await fetch(`${API_BASE}${url}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`PATCH ${url} failed: ${res.status}`);
+    return res.json();
+  }, []);
+
+  return { get, post, postJson, patchJson };
 }

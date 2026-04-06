@@ -123,6 +123,22 @@ const FIELD_META: {
   },
 ];
 
+const HOT_RELOAD_FIELDS: Record<string, Set<string>> = {
+  risk: new Set([
+    "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
+    "max_daily_trades", "consecutive_loss_limit", "cooldown_minutes",
+  ]),
+  strategy: new Set(["min_confidence"]),
+  screening: new Set([
+    "min_volume_krw", "min_volatility_pct", "max_volatility_pct",
+    "max_coins", "always_include",
+  ]),
+};
+
+function isHotReloadable(section: string, key: string): boolean {
+  return HOT_RELOAD_FIELDS[section]?.has(key) ?? false;
+}
+
 function formatDisplay(section: string, key: string, value: unknown): string {
   if (key === "always_include" && Array.isArray(value)) return value.join(", ");
   if (key === "initial_balance" || key === "min_order_krw")
@@ -135,13 +151,14 @@ function formatDisplay(section: string, key: string, value: unknown): string {
 }
 
 export default function Settings() {
-  const { get, post, postJson } = useApi();
+  const { get, post, postJson, patchJson } = useApi();
   const [status, setStatus] = useState<SystemStatus>("running");
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [config, setConfig] = useState<ConfigValues | null>(null);
   const [form, setForm] = useState<ConfigValues | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [hotEditMode, setHotEditMode] = useState(false);
 
   useEffect(() => {
     get<ConfigValues>("/api/control/config").then((data) => {
@@ -173,6 +190,46 @@ export default function Settings() {
     setEditMode(false);
     setForm(config ? structuredClone(config) : null);
     await handleResume();
+  };
+
+  const handleStartHotEdit = () => {
+    setHotEditMode(true);
+    setForm(config ? structuredClone(config) : null);
+  };
+
+  const handleCancelHotEdit = () => {
+    setHotEditMode(false);
+    setForm(config ? structuredClone(config) : null);
+  };
+
+  const handleApplyHotReload = async () => {
+    if (!form || !config) return;
+    setLoading(true);
+
+    const patch: Record<string, Record<string, unknown>> = {};
+    for (const { section, fields } of FIELD_META) {
+      for (const { key } of fields) {
+        if (!isHotReloadable(section, key)) continue;
+        const oldVal = (config[section] as Record<string, unknown>)[key];
+        const newVal = (form[section] as Record<string, unknown>)[key];
+        if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+          if (!patch[section]) patch[section] = {};
+          patch[section][key] = newVal;
+        }
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      setHotEditMode(false);
+      setLoading(false);
+      return;
+    }
+
+    const res = await patchJson<{ status: string; config: ConfigValues }>("/api/control/config", patch);
+    setConfig(res.config);
+    setForm(structuredClone(res.config));
+    setHotEditMode(false);
+    setLoading(false);
   };
 
   const handleConfirmReset = async () => {
@@ -271,9 +328,14 @@ export default function Settings() {
         <div className="panel-header">
           <h3>매매 설정</h3>
           {editMode ? (
-            <span className="badge warn">편집 중</span>
+            <span className="badge warn">초기화 편집 중</span>
+          ) : hotEditMode ? (
+            <span className="badge" style={{ background: "var(--accent)", color: "#fff" }}>설정 변경 중</span>
           ) : (
             <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-primary" onClick={handleStartHotEdit} disabled={loading}>
+                설정 변경
+              </button>
               <button className="btn btn-danger" onClick={handleStartReset} disabled={loading}>
                 초기화 &amp; 재설정
               </button>
@@ -317,21 +379,25 @@ export default function Settings() {
                     }}
                   >
                     <span style={{ color: "var(--text-dim)" }}>{fieldLabel}</span>
-                    {editMode && form ? (
+                    {(editMode || hotEditMode) && form ? (
                       <input
                         type={type}
                         value={inputValue(section, key)}
                         onChange={(e) => updateField(section, key, e.target.value)}
+                        disabled={hotEditMode && !isHotReloadable(section, key)}
                         style={{
                           width: 160,
                           padding: "4px 8px",
-                          background: "var(--card)",
+                          background: hotEditMode && !isHotReloadable(section, key)
+                            ? "var(--bg)" : "var(--card)",
                           border: "1px solid var(--border)",
                           borderRadius: 4,
-                          color: "var(--text)",
+                          color: hotEditMode && !isHotReloadable(section, key)
+                            ? "var(--text-dim)" : "var(--text)",
                           fontFamily: "var(--font-mono)",
                           fontSize: 13,
                           textAlign: "right",
+                          opacity: hotEditMode && !isHotReloadable(section, key) ? 0.5 : 1,
                         }}
                       />
                     ) : (
@@ -345,7 +411,7 @@ export default function Settings() {
             ))}
           </div>
 
-          {editMode && (
+          {(editMode || hotEditMode) && (
             <div
               style={{
                 display: "flex",
@@ -356,16 +422,30 @@ export default function Settings() {
                 borderTop: "1px solid var(--border)",
               }}
             >
-              <button className="btn" onClick={handleCancelReset} disabled={loading}>
-                취소
-              </button>
               <button
-                className="btn btn-primary"
-                onClick={() => setShowConfirm(true)}
+                className="btn"
+                onClick={editMode ? handleCancelReset : handleCancelHotEdit}
                 disabled={loading}
               >
-                적용 &amp; 시작
+                취소
               </button>
+              {editMode ? (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setShowConfirm(true)}
+                  disabled={loading}
+                >
+                  적용 &amp; 시작
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  onClick={handleApplyHotReload}
+                  disabled={loading}
+                >
+                  적용
+                </button>
+              )}
             </div>
           )}
         </div>
