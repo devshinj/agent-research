@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -80,7 +81,7 @@ class Settings:
         return Settings.from_dict(raw)
 
     @staticmethod
-    def from_dict(raw: dict) -> Settings:
+    def from_dict(raw: dict[str, Any]) -> Settings:
         return Settings(
             paper_trading=PaperTradingConfig(
                 initial_balance=Decimal(str(raw["paper_trading"]["initial_balance"])),
@@ -127,7 +128,7 @@ class Settings:
             ),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Return settings as a plain dict (for JSON API responses)."""
         return {
             "paper_trading": {
