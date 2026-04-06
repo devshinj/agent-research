@@ -11,6 +11,9 @@ class Screener:
     def __init__(self, config: ScreeningConfig) -> None:
         self._config = config
 
+    def update_config(self, config: ScreeningConfig) -> None:
+        self._config = config
+
     def screen(
         self,
         tickers: list[dict[str, Any]],

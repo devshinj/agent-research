@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 import joblib
 import pandas as pd
@@ -21,10 +23,22 @@ class Predictor:
         self._fb = feature_builder
         self._min_confidence = min_confidence
         self._models: dict[str, object] = {}
+        self._model_meta: dict[str, dict[str, Any]] = {}
+
+    def update_min_confidence(self, value: float) -> None:
+        self._min_confidence = value
 
     def load_model(self, market: str, model_path: Path) -> None:
         self._models[market] = joblib.load(model_path)
+        meta_path = model_path.with_suffix(".json")
+        if meta_path.exists():
+            self._model_meta[market] = json.loads(meta_path.read_text())
+        else:
+            self._model_meta[market] = {}
         logger.info("Loaded model for %s from %s", market, model_path)
+
+    def get_model_meta(self, market: str) -> dict[str, Any]:
+        return self._model_meta.get(market, {})
 
     def predict(self, market: str, candle_df: pd.DataFrame) -> Signal:
         if market not in self._models:

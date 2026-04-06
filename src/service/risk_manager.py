@@ -19,6 +19,9 @@ class RiskManager:
         self._daily_trades = 0
         self._current_day = ""
 
+    def update_config(self, risk_config: RiskConfig) -> None:
+        self._risk = risk_config
+
     def approve(self, signal: Signal, account: PaperAccount) -> tuple[bool, str]:
         # SELL은 보유 중이면 허용
         if signal.signal_type == SignalType.SELL:
@@ -56,11 +59,16 @@ class RiskManager:
         return True, "OK"
 
     def calculate_position_size(self, account: PaperAccount) -> Decimal:
+        from decimal import ROUND_DOWN
+
         total_equity = account.cash_balance + sum(
             p.entry_price * p.quantity for p in account.positions.values()
         )
         max_amount = total_equity * self._pt.max_position_pct
-        return min(account.cash_balance, max_amount)
+        # Truncate to integer KRW — real exchanges never settle fractional won
+        return min(account.cash_balance, max_amount).to_integral_value(
+            rounding=ROUND_DOWN,
+        )
 
     def record_loss(self) -> None:
         self._consecutive_losses += 1
