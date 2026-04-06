@@ -95,6 +95,17 @@ class Database:
             raise RuntimeError("Database not initialized. Call initialize() first.")
         return self._conn
 
+    async def reset_trading_data(self) -> None:
+        """Delete all trading data. Preserves candles and screening_log."""
+        await self.conn.executescript(
+            "DELETE FROM orders;"
+            "DELETE FROM positions;"
+            "DELETE FROM account_state;"
+            "DELETE FROM daily_summary;"
+            "DELETE FROM risk_state;"
+        )
+        await self.conn.commit()
+
     async def close(self) -> None:
         if self._conn:
             await self._conn.close()

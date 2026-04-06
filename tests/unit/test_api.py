@@ -24,7 +24,7 @@ async def test_dashboard_summary(client):
     data = resp.json()
     assert "total_equity" in data
     assert "cash_balance" in data
-    assert "daily_pnl" in data
+    assert "total_pnl" in data
 
 
 async def test_portfolio_positions(client):
@@ -39,3 +39,48 @@ async def test_risk_status(client):
     data = resp.json()
     assert "circuit_breaker_active" in data
     assert "consecutive_losses" in data
+
+
+async def test_reset_trading_data():
+    from src.repository.database import Database
+
+    db = Database(":memory:")
+    await db.initialize()
+
+    # Insert dummy data into each trading table
+    await db.conn.execute(
+        "INSERT INTO account_state (id, cash_balance, updated_at) VALUES (1, '5000000', 100)"
+    )
+    await db.conn.execute(
+        "INSERT INTO orders (id, market, side, order_type, price, quantity, fee, status, created_at) "
+        "VALUES ('o1', 'KRW-BTC', 'BUY', 'MARKET', '1000', '1', '0.5', 'FILLED', 100)"
+    )
+    await db.conn.execute(
+        "INSERT INTO positions (market, side, entry_price, quantity, entry_time, unrealized_pnl, highest_price) "
+        "VALUES ('KRW-BTC', 'BUY', '1000', '1', 100, '0', '1000')"
+    )
+    await db.conn.execute(
+        "INSERT INTO daily_summary (date, starting_balance, ending_balance, realized_pnl, total_trades, win_trades, loss_trades, max_drawdown_pct) "
+        "VALUES ('2026-04-06', '10000000', '10500000', '500000', 5, 3, 2, '0.02')"
+    )
+    await db.conn.execute(
+        "INSERT INTO risk_state (id, consecutive_losses, cooldown_until, daily_loss, daily_trades, current_day, updated_at) "
+        "VALUES (1, 3, 0, '100000', 5, '2026-04-06', 100)"
+    )
+    await db.conn.commit()
+
+    # Reset
+    await db.reset_trading_data()
+
+    # Verify all trading tables are empty
+    for table in ("orders", "positions", "account_state", "daily_summary", "risk_state"):
+        cursor = await db.conn.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
+        row = await cursor.fetchone()
+        assert row[0] == 0, f"{table} should be empty after reset"
+
+    # Verify candles table still exists and is untouched
+    cursor = await db.conn.execute("SELECT COUNT(*) FROM candles")
+    row = await cursor.fetchone()
+    assert row[0] == 0  # was empty, still exists
+
+    await db.close()
