@@ -1,4 +1,5 @@
 import pytest
+from decimal import Decimal
 from httpx import ASGITransport, AsyncClient
 
 from src.ui.api.server import create_app
@@ -8,6 +9,52 @@ from src.ui.api.server import create_app
 async def client():
     app = create_app()
     transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.fixture
+async def client_with_app():
+    """Client with a real App instance for endpoints that need it."""
+    from src.config.settings import (
+        Settings, PaperTradingConfig, RiskConfig, ScreeningConfig,
+        StrategyConfig, CollectorConfig, DataConfig,
+    )
+    from src.runtime.app import App
+
+    fastapi_app = create_app()
+    settings = Settings(
+        paper_trading=PaperTradingConfig(
+            initial_balance=Decimal("5000000"), max_position_pct=Decimal("0.25"),
+            max_open_positions=4, fee_rate=Decimal("0.0005"),
+            slippage_rate=Decimal("0.0005"), min_order_krw=5000,
+        ),
+        risk=RiskConfig(
+            stop_loss_pct=Decimal("0.02"), take_profit_pct=Decimal("0.05"),
+            trailing_stop_pct=Decimal("0.015"), max_daily_loss_pct=Decimal("0.05"),
+            max_daily_trades=50, consecutive_loss_limit=5, cooldown_minutes=60,
+        ),
+        screening=ScreeningConfig(
+            min_volume_krw=Decimal("500000000"), min_volatility_pct=Decimal("1.0"),
+            max_volatility_pct=Decimal("15.0"), max_coins=10,
+            refresh_interval_min=30, always_include=("KRW-BTC",),
+        ),
+        strategy=StrategyConfig(
+            lookahead_minutes=5, threshold_pct=Decimal("0.3"),
+            retrain_interval_hours=6, min_confidence=Decimal("0.6"),
+        ),
+        collector=CollectorConfig(
+            candle_timeframe=1, max_candles_per_market=200,
+            market_refresh_interval_min=60,
+        ),
+        data=DataConfig(
+            db_path=":memory:", model_dir="data/models",
+            stale_candle_days=7, stale_model_days=30, stale_order_days=90,
+        ),
+    )
+    app_instance = App(settings)
+    fastapi_app.state.app = app_instance
+    transport = ASGITransport(app=fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
@@ -24,7 +71,7 @@ async def test_dashboard_summary(client):
     data = resp.json()
     assert "total_equity" in data
     assert "cash_balance" in data
-    assert "total_pnl" in data
+    assert "daily_pnl" in data
 
 
 async def test_portfolio_positions(client):
@@ -172,3 +219,36 @@ async def test_reset(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "running"
+
+
+async def test_patch_config_hot_reload(client_with_app):
+    resp = await client_with_app.patch("/api/control/config", json={
+        "risk": {"stop_loss_pct": 0.03},
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "updated"
+    assert "risk" in data["updated_fields"]
+    assert "stop_loss_pct" in data["updated_fields"]["risk"]
+    assert data["config"]["risk"]["stop_loss_pct"] == 0.03
+
+
+async def test_patch_config_rejects_forbidden(client_with_app):
+    resp = await client_with_app.patch("/api/control/config", json={
+        "paper_trading": {"initial_balance": 10000000},
+    })
+    assert resp.status_code == 400
+    assert "핫 리로드 불가" in resp.json()["detail"]
+
+
+async def test_patch_config_multiple_sections(client_with_app):
+    resp = await client_with_app.patch("/api/control/config", json={
+        "risk": {"take_profit_pct": 0.08},
+        "screening": {"max_coins": 5},
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "risk" in data["updated_fields"]
+    assert "screening" in data["updated_fields"]
+    assert data["config"]["risk"]["take_profit_pct"] == 0.08
+    assert data["config"]["screening"]["max_coins"] == 5
