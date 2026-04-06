@@ -102,6 +102,27 @@ async def test_get_config(client):
     assert "data" in data
 
 
+async def test_strategy_signals(client):
+    resp = await client.get("/api/strategy/signals")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+async def test_strategy_signals_with_params(client):
+    resp = await client.get("/api/strategy/signals?limit=10&include_hold=true")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+async def test_strategy_model_status(client):
+    resp = await client.get("/api/strategy/model-status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "models" in data
+    assert "last_retrain" in data
+    assert "next_retrain_hours" in data
+
+
 async def test_reset(client):
     resp = await client.post("/api/control/reset", json={
         "paper_trading": {

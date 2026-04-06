@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Request
 
 router = APIRouter()
@@ -21,27 +24,101 @@ async def get_screening(request: Request) -> list:
             "market": r.market,
             "korean_name": r.korean_name,
             "volume_krw": str(r.volume_krw),
-            "volatility_pct": str(r.volatility * 100),
-            "score": str(r.score),
+            "volatility_pct": str(r.volatility),
+            "score": float(r.score),
         }
         for r in results
     ]
 
 
 @router.get("/signals")
-async def get_signals(request: Request) -> list:
-    # Signals are ephemeral events; return empty until we add a signal log
-    return []
+async def get_signals(
+    request: Request, limit: int = 50, include_hold: bool = False,
+) -> list:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return []
+
+    rows = await app.signal_repo.get_recent(limit=limit, include_hold=include_hold)
+    return [
+        {
+            "market": r["market"],
+            "signal_type": r["signal_type"],
+            "confidence": r["confidence"],
+            "created_at": datetime.fromtimestamp(
+                r["timestamp"], tz=UTC,
+            ).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for r in rows
+    ]
 
 
 @router.get("/model-status")
 async def get_model_status(request: Request) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
-        return {"models": {}, "last_retrain": None}
+        return {"models": {}, "last_retrain": None, "next_retrain_hours": None}
 
     models = {}
-    for market, model in app.predictor._models.items():
-        models[market] = {"loaded": True}
+    last_retrain: str | None = None
+    last_retrain_epoch: int = 0
 
-    return {"models": models, "last_retrain": None}
+    for market in app.predictor._models:
+        meta = app.predictor.get_model_meta(market)
+        accuracy = meta.get("accuracy", 0)
+        n_train = meta.get("n_train", 0)
+        n_val = meta.get("n_val", 0)
+        timestamp = meta.get("timestamp", "")
+
+        last_train = ""
+        if timestamp:
+            last_train = (
+                f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
+                f" {timestamp[9:11]}:{timestamp[11:13]}"
+            )
+            if last_retrain is None or timestamp > (last_retrain or ""):
+                last_retrain = timestamp
+
+        # Signal stats from DB
+        stats = await app.signal_repo.get_stats_by_market(market)
+
+        models[market] = {
+            "accuracy": accuracy,
+            "last_train": last_train,
+            "n_train": n_train,
+            "n_val": n_val,
+            "total_signals": stats["total_signals"],
+            "buy_count": stats["buy_count"],
+            "sell_count": stats["sell_count"],
+            "hold_count": stats["hold_count"],
+            "avg_confidence": stats["avg_confidence"],
+        }
+
+    formatted_retrain: str | None = None
+    if last_retrain:
+        formatted_retrain = (
+            f"{last_retrain[:4]}-{last_retrain[4:6]}-{last_retrain[6:8]}"
+            f" {last_retrain[9:11]}:{last_retrain[11:13]}"
+        )
+        try:
+            dt = datetime(
+                int(last_retrain[:4]), int(last_retrain[4:6]),
+                int(last_retrain[6:8]), int(last_retrain[9:11]),
+                int(last_retrain[11:13]), tzinfo=UTC,
+            )
+            last_retrain_epoch = int(dt.timestamp())
+        except (ValueError, IndexError):
+            last_retrain_epoch = 0
+
+    next_retrain_hours: float | None = None
+    if last_retrain_epoch > 0:
+        retrain_interval_s = app.settings.strategy.retrain_interval_hours * 3600
+        next_retrain_epoch = last_retrain_epoch + retrain_interval_s
+        remaining_s = next_retrain_epoch - int(time.time())
+        next_retrain_hours = round(max(0, remaining_s / 3600), 1)
+
+    return {
+        "models": models,
+        "last_retrain": formatted_retrain,
+        "next_retrain_hours": next_retrain_hours,
+    }
