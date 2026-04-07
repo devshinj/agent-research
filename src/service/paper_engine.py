@@ -65,14 +65,17 @@ class PaperEngine:
 
         existing = account.positions.get(market)
         if existing is not None:
-            # Additional buy: compute weighted average entry price
-            total_qty = existing.quantity + quantity
-            avg_price = (
-                (existing.entry_price * existing.quantity + fill_price * quantity)
-                / total_qty
+            # 추가매수: 가중평균 entry_price 계산
+            new_total_invested = existing.total_invested + actual_spend
+            new_quantity = existing.quantity + quantity
+            new_entry_price = (
+                new_total_invested / new_quantity
+                if new_quantity > _ZERO else fill_price
             )
-            existing.entry_price = avg_price
-            existing.quantity = total_qty
+            existing.entry_price = new_entry_price
+            existing.quantity = new_quantity
+            existing.total_invested = new_total_invested
+            existing.add_count += 1
             existing.highest_price = max(existing.highest_price, fill_price)
             if reason == "MANUAL":
                 existing.trade_mode = "MANUAL"
@@ -86,6 +89,8 @@ class PaperEngine:
                 entry_time=now,
                 unrealized_pnl=_ZERO,
                 highest_price=fill_price,
+                add_count=0,
+                total_invested=actual_spend,
                 trade_mode=trade_mode,
             )
             order_reason = reason if reason else "ML_SIGNAL"
@@ -145,13 +150,16 @@ class PaperEngine:
         account: PaperAccount,
         market: str,
         current_price: Decimal,
-        sell_ratio: Decimal,
+        fraction: Decimal,
         reason: str | None = None,
     ) -> Order:
+        """fraction(0~1) 비율만큼 수량을 매도. 잔여 포지션 유지."""
         position = account.positions[market]
-        sell_quantity = (position.quantity * sell_ratio).quantize(
+        sell_quantity = (position.quantity * fraction).quantize(
             Decimal("0.00000001"), rounding=ROUND_DOWN,
         )
+        remaining = position.quantity - sell_quantity
+
         fill_price = current_price * (_ONE - self._config.slippage_rate)
         proceeds = _truncate_krw(fill_price * sell_quantity)
         fee = _truncate_krw(proceeds * self._config.fee_rate)
@@ -159,10 +167,24 @@ class PaperEngine:
         now = int(time.time())
 
         account.cash_balance += net_proceeds
-        position.quantity -= sell_quantity
 
-        if position.quantity <= _ZERO:
+        # 잔여 수량이 min_order_krw 미만이면 전량 청산
+        remaining_value = remaining * position.entry_price
+        if remaining_value < self._config.min_order_krw:
+            # 잔여분도 매도
+            extra_proceeds = _truncate_krw(fill_price * remaining)
+            extra_fee = _truncate_krw(extra_proceeds * self._config.fee_rate)
+            account.cash_balance += extra_proceeds - extra_fee
+            sell_quantity = position.quantity
+            fee += extra_fee
             del account.positions[market]
+        else:
+            position.quantity = remaining
+            # total_invested 비례 감소
+            if position.quantity > _ZERO:
+                ratio = remaining / (remaining + sell_quantity)
+                position.total_invested = _truncate_krw(position.total_invested * ratio)
+            position.partial_sold = True
 
         order_reason = reason if reason else "PARTIAL_TAKE_PROFIT"
 

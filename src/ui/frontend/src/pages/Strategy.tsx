@@ -78,6 +78,7 @@ interface SettingFieldDef {
   section: "screening" | "strategy" | "entry_analyzer";
   key: string;
   label: string;
+  desc: string;
   min: number;
   max: number;
   step: number;
@@ -86,15 +87,15 @@ interface SettingFieldDef {
 }
 
 const STRATEGY_FIELDS: SettingFieldDef[] = [
-  { section: "screening", key: "min_volume_krw", label: "최소 거래대금", min: 100000000, max: 5000000000, step: 100000000, format: (v) => `₩${(v / 100000000).toFixed(0)}억`, hotReload: true },
-  { section: "screening", key: "min_volatility_pct", label: "최소 변동성", min: 0.5, max: 10, step: 0.5, format: (v) => `${v}%`, hotReload: true },
-  { section: "screening", key: "max_volatility_pct", label: "최대 변동성", min: 5, max: 50, step: 1, format: (v) => `${v}%`, hotReload: true },
-  { section: "screening", key: "max_coins", label: "최대 코인 수", min: 1, max: 20, step: 1, format: (v) => `${v}개`, hotReload: true },
-  { section: "strategy", key: "min_confidence", label: "최소 신뢰도", min: 0.3, max: 0.95, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%`, hotReload: true },
-  { section: "strategy", key: "threshold_pct", label: "분류 임계값", min: 0.1, max: 1.0, step: 0.05, format: (v) => `±${v}%`, hotReload: false },
-  { section: "strategy", key: "retrain_interval_hours", label: "재학습 주기", min: 1, max: 24, step: 1, format: (v) => `${v}시간`, hotReload: false },
-  { section: "entry_analyzer", key: "min_entry_score", label: "최소 진입 스코어", min: 0.1, max: 0.9, step: 0.05, format: (v) => `${v}`, hotReload: false },
-  { section: "entry_analyzer", key: "price_lookback_candles", label: "가격 참조 캔들", min: 20, max: 200, step: 10, format: (v) => `${v}개`, hotReload: false },
+  { section: "screening", key: "min_volume_krw", label: "최소 거래대금", desc: "24시간 거래대금이 이 금액 미만인 코인은 스크리닝에서 제외됩니다", min: 100000000, max: 5000000000, step: 100000000, format: (v) => `₩${(v / 100000000).toFixed(0)}억`, hotReload: true },
+  { section: "screening", key: "min_volatility_pct", label: "최소 변동성", desc: "변동성이 이 값보다 낮은 코인은 매매 기회가 적어 제외됩니다", min: 0.5, max: 10, step: 0.5, format: (v) => `${v}%`, hotReload: true },
+  { section: "screening", key: "max_volatility_pct", label: "최대 변동성", desc: "변동성이 이 값을 초과하는 코인은 위험이 높아 제외됩니다", min: 5, max: 50, step: 1, format: (v) => `${v}%`, hotReload: true },
+  { section: "screening", key: "max_coins", label: "최대 코인 수", desc: "스크리닝 결과에서 상위 N개 코인만 선택합니다", min: 1, max: 20, step: 1, format: (v) => `${v}개`, hotReload: true },
+  { section: "strategy", key: "min_confidence", label: "최소 신뢰도", desc: "ML 모델의 예측 신뢰도가 이 값 이하이면 HOLD로 처리합니다", min: 0.3, max: 0.95, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%`, hotReload: true },
+  { section: "strategy", key: "threshold_pct", label: "분류 임계값", desc: "라벨링 시 ±이 비율 이상 변동해야 BUY/SELL로 분류합니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `±${v}%`, hotReload: false },
+  { section: "strategy", key: "retrain_interval_hours", label: "재학습 주기", desc: "ML 모델을 자동으로 재학습하는 간격입니다", min: 1, max: 24, step: 1, format: (v) => `${v}시간`, hotReload: false },
+  { section: "entry_analyzer", key: "min_entry_score", label: "최소 진입 스코어", desc: "가격위치/RSI/추세를 종합한 스코어가 이 값 미만이면 매수를 거부합니다 (0~1)", min: 0.1, max: 0.9, step: 0.05, format: (v) => `${v}`, hotReload: false },
+  { section: "entry_analyzer", key: "price_lookback_candles", label: "가격 참조 캔들", desc: "현재 가격의 상대적 위치를 판단할 때 참조하는 최근 캔들 수입니다", min: 20, max: 200, step: 10, format: (v) => `${v}개`, hotReload: false },
 ];
 
 type SortKey = "volume_krw" | "volatility_pct" | "score";
@@ -489,9 +490,9 @@ export default function Strategy() {
           )}
         </div>
         <div className="panel-body">
-          {STRATEGY_FIELDS.map(({ section, key, label, min, max, step, format, hotReload }) => (
+          {STRATEGY_FIELDS.map(({ section, key, label, desc, min, max, step, format, hotReload }) => (
             <div key={`${section}.${key}`} className="slider-row">
-              <span className="slider-label">
+              <span className="slider-label" data-tooltip={desc}>
                 {label}
                 {!hotReload && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>(초기화 필요)</span>}
               </span>

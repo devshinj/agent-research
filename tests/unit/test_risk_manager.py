@@ -131,6 +131,34 @@ def test_reject_below_min_order():
     assert "최소 주문" in reason
 
 
+def test_record_daily_loss_accumulates():
+    rm = RiskManager(make_risk_config(), make_pt_config())
+    rm.record_daily_loss(Decimal("0.02"))
+    rm.record_daily_loss(Decimal("0.01"))
+    state = rm.dump_state()
+    assert Decimal(str(state["daily_loss"])) == Decimal("0.03")
+
+
+def test_reject_when_daily_loss_limit_reached():
+    rm = RiskManager(make_risk_config(), make_pt_config())
+    # max_daily_loss_pct = 0.05 → 5% 이상 누적 손실 시 매수 차단
+    rm.record_daily_loss(Decimal("0.03"))
+    rm.record_daily_loss(Decimal("0.03"))  # 총 6%
+    account = make_account()
+    signal = Signal("KRW-BTC", SignalType.BUY, 0.8, 1700000000)
+    approved, reason = rm.approve(signal, account)
+    assert approved is False
+    assert "일일 최대 손실" in reason
+
+
+def test_daily_loss_reset():
+    rm = RiskManager(make_risk_config(), make_pt_config())
+    rm.record_daily_loss(Decimal("0.04"))
+    rm.reset_daily()
+    state = rm.dump_state()
+    assert Decimal(str(state["daily_loss"])) == Decimal("0")
+
+
 def test_dump_and_load_state():
     rm = RiskManager(make_risk_config(), make_pt_config())
     for _ in range(3):

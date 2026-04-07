@@ -32,6 +32,7 @@ class PortfolioManager:
         if pnl_pct <= -self._risk.stop_loss_pct:
             return "STOP_LOSS"
 
+        # 트레일링 스톱: 수익 상태에서만 발동 (평단 아래면 무시)
         if current_price > position.entry_price and position.highest_price > position.entry_price:
             drop_from_high = (
                 (position.highest_price - current_price) / position.highest_price

@@ -46,7 +46,8 @@ def test_feature_columns_present():
 
 
 def test_no_nan_in_output():
-    df = make_candle_df(200)
+    # 300행 이상이어야 모든 multi-timeframe feature도 생성됨
+    df = make_candle_df(350)
     builder = FeatureBuilder()
     features = builder.build(df)
     # dropna 후 rows가 존재해야 함
