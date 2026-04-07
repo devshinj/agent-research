@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useApi } from "../hooks/useApi";
 
 const REFRESH_INTERVAL_MS = 30_000;
@@ -67,16 +68,50 @@ interface ModelStatus {
   training: Record<string, number>;
 }
 
+interface StrategyConfig {
+  screening: { min_volume_krw: number; min_volatility_pct: number; max_volatility_pct: number; max_coins: number; refresh_interval_min: number; always_include: string[] };
+  strategy: { lookahead_minutes: number; threshold_pct: number; retrain_interval_hours: number; min_confidence: number };
+  entry_analyzer: { min_entry_score: number; price_lookback_candles: number };
+}
+
+interface SettingFieldDef {
+  section: "screening" | "strategy" | "entry_analyzer";
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+  hotReload: boolean;
+}
+
+const STRATEGY_FIELDS: SettingFieldDef[] = [
+  { section: "screening", key: "min_volume_krw", label: "최소 거래대금", min: 100000000, max: 5000000000, step: 100000000, format: (v) => `₩${(v / 100000000).toFixed(0)}억`, hotReload: true },
+  { section: "screening", key: "min_volatility_pct", label: "최소 변동성", min: 0.5, max: 10, step: 0.5, format: (v) => `${v}%`, hotReload: true },
+  { section: "screening", key: "max_volatility_pct", label: "최대 변동성", min: 5, max: 50, step: 1, format: (v) => `${v}%`, hotReload: true },
+  { section: "screening", key: "max_coins", label: "최대 코인 수", min: 1, max: 20, step: 1, format: (v) => `${v}개`, hotReload: true },
+  { section: "strategy", key: "min_confidence", label: "최소 신뢰도", min: 0.3, max: 0.95, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%`, hotReload: true },
+  { section: "strategy", key: "threshold_pct", label: "분류 임계값", min: 0.1, max: 1.0, step: 0.05, format: (v) => `±${v}%`, hotReload: false },
+  { section: "strategy", key: "retrain_interval_hours", label: "재학습 주기", min: 1, max: 24, step: 1, format: (v) => `${v}시간`, hotReload: false },
+  { section: "entry_analyzer", key: "min_entry_score", label: "최소 진입 스코어", min: 0.1, max: 0.9, step: 0.05, format: (v) => `${v}`, hotReload: false },
+  { section: "entry_analyzer", key: "price_lookback_candles", label: "가격 참조 캔들", min: 20, max: 200, step: 10, format: (v) => `${v}개`, hotReload: false },
+];
+
 type SortKey = "volume_krw" | "volatility_pct" | "score";
 type SortDir = "asc" | "desc";
 
 export default function Strategy() {
-  const { get } = useApi();
+  const { get, patchJson } = useApi();
   const [screening, setScreening] = useState<ScreeningResult[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [tooltipSignal, setTooltipSignal] = useState<{ basis: BasisEntry[]; x: number; y: number } | null>(null);
+  const [config, setConfig] = useState<StrategyConfig | null>(null);
+  const [form, setForm] = useState<Record<string, Record<string, number>>>({});
+  const [saving, setSaving] = useState(false);
+  const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null);
 
   const refreshAll = useCallback(() => {
     get<ScreeningResult[]>("/api/strategy/screening").then(setScreening);
@@ -90,6 +125,70 @@ export default function Strategy() {
     const id = setInterval(refreshAll, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refreshAll]);
+
+  useEffect(() => {
+    get<StrategyConfig>("/api/control/config").then((data) => {
+      setConfig(data);
+      setForm({
+        screening: { min_volume_krw: data.screening.min_volume_krw, min_volatility_pct: data.screening.min_volatility_pct, max_volatility_pct: data.screening.max_volatility_pct, max_coins: data.screening.max_coins },
+        strategy: { min_confidence: data.strategy.min_confidence, threshold_pct: data.strategy.threshold_pct, retrain_interval_hours: data.strategy.retrain_interval_hours },
+        entry_analyzer: { min_entry_score: data.entry_analyzer.min_entry_score, price_lookback_candles: data.entry_analyzer.price_lookback_candles },
+      });
+    });
+  }, [get]);
+
+  const handleSlider = (section: string, key: string, value: number) => {
+    setForm((prev) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+  };
+
+  const hasSettingsChanges = (): boolean => {
+    if (!config) return false;
+    return STRATEGY_FIELDS.some(({ section, key }) => {
+      const orig = (config[section] as Record<string, unknown>)[key];
+      return form[section]?.[key] !== undefined && form[section][key] !== orig;
+    });
+  };
+
+  const handleSettingsReset = () => {
+    if (!config) return;
+    setForm({
+      screening: { min_volume_krw: config.screening.min_volume_krw, min_volatility_pct: config.screening.min_volatility_pct, max_volatility_pct: config.screening.max_volatility_pct, max_coins: config.screening.max_coins },
+      strategy: { min_confidence: config.strategy.min_confidence, threshold_pct: config.strategy.threshold_pct, retrain_interval_hours: config.strategy.retrain_interval_hours },
+      entry_analyzer: { min_entry_score: config.entry_analyzer.min_entry_score, price_lookback_candles: config.entry_analyzer.price_lookback_candles },
+    });
+  };
+
+  const handleSettingsApply = async () => {
+    if (!config) return;
+    setSaving(true);
+    setSettingsFeedback(null);
+    const patch: Record<string, Record<string, number>> = {};
+    for (const { section, key, hotReload } of STRATEGY_FIELDS) {
+      if (!hotReload) continue;
+      const orig = (config[section] as Record<string, unknown>)[key];
+      const curr = form[section]?.[key];
+      if (curr !== undefined && curr !== orig) {
+        if (!patch[section]) patch[section] = {};
+        patch[section][key] = curr;
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      setSaving(false);
+      setSettingsFeedback("변경 사항 없음");
+      setTimeout(() => setSettingsFeedback(null), 2000);
+      return;
+    }
+    try {
+      const res = await patchJson<{ config: StrategyConfig }>("/api/control/config", patch);
+      setConfig(res.config);
+      setSettingsFeedback("적용 완료");
+      setTimeout(() => setSettingsFeedback(null), 3000);
+    } catch {
+      setSettingsFeedback("적용 실패");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -198,7 +297,17 @@ export default function Strategy() {
             </thead>
             <tbody>
               {signals.map((s, i) => (
-                <tr key={i} className="signal-row">
+                <tr
+                  key={i}
+                  className="signal-row"
+                  onMouseEnter={(e) => {
+                    if (s.basis) {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTooltipSignal({ basis: s.basis, x: rect.left, y: rect.bottom + 4 });
+                    }
+                  }}
+                  onMouseLeave={() => setTooltipSignal(null)}
+                >
                   <td>{s.created_at}</td>
                   <td style={{ color: "var(--text)", fontWeight: 600 }}>{s.market}</td>
                   <td>
@@ -206,7 +315,7 @@ export default function Strategy() {
                       {s.signal_type}
                     </span>
                   </td>
-                  <td style={{ position: "relative" }}>
+                  <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div className="progress-bar" style={{ flex: 1, maxWidth: 80 }}>
                         <div
@@ -216,27 +325,6 @@ export default function Strategy() {
                       </div>
                       <span>{(s.confidence * 100).toFixed(0)}%</span>
                     </div>
-                    {s.basis && (
-                      <div className="signal-tooltip">
-                        <div className="signal-tooltip-title">신호 근거</div>
-                        {s.basis.map((b) => (
-                          <div key={b.feature} className="signal-tooltip-row">
-                            <span className={`signal-tooltip-arrow ${b.shap >= 0 ? "up" : "down"}`}>
-                              {b.shap >= 0 ? "\u2191" : "\u2193"}
-                            </span>
-                            <span className="signal-tooltip-name">
-                              {FEATURE_LABELS[b.feature] ?? b.feature}
-                            </span>
-                            <span className="signal-tooltip-val">
-                              {Math.abs(b.value) >= 1 ? b.value.toFixed(1) : b.value.toFixed(4)}
-                            </span>
-                            <span className={`signal-tooltip-shap ${b.shap >= 0 ? "positive" : "negative"}`}>
-                              {b.shap >= 0 ? "+" : ""}{b.shap.toFixed(3)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </td>
                 </tr>
               ))}
@@ -244,6 +332,32 @@ export default function Strategy() {
           </table>
         )}
       </div>
+
+      {tooltipSignal && createPortal(
+        <div
+          className="signal-tooltip"
+          style={{ display: "block", position: "fixed", left: tooltipSignal.x, top: tooltipSignal.y }}
+        >
+          <div className="signal-tooltip-title">신호 근거</div>
+          {tooltipSignal.basis.map((b) => (
+            <div key={b.feature} className="signal-tooltip-row">
+              <span className={`signal-tooltip-arrow ${b.shap >= 0 ? "up" : "down"}`}>
+                {b.shap >= 0 ? "\u2191" : "\u2193"}
+              </span>
+              <span className="signal-tooltip-name">
+                {FEATURE_LABELS[b.feature] ?? b.feature}
+              </span>
+              <span className="signal-tooltip-val">
+                {Math.abs(b.value) >= 1 ? b.value.toFixed(1) : b.value.toFixed(4)}
+              </span>
+              <span className={`signal-tooltip-shap ${b.shap >= 0 ? "positive" : "negative"}`}>
+                {b.shap >= 0 ? "+" : ""}{b.shap.toFixed(3)}
+              </span>
+            </div>
+          ))}
+        </div>,
+        document.body,
+      )}
 
       {/* ── Model Status ───────────────────── */}
       <div className="panel">
@@ -361,6 +475,44 @@ export default function Strategy() {
               })}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ── Strategy Settings ───────────── */}
+      <div className="panel">
+        <div className="panel-header">
+          <h3>전략 설정</h3>
+          {settingsFeedback && (
+            <span className={`badge ${settingsFeedback === "적용 완료" ? "profit" : settingsFeedback === "적용 실패" ? "loss" : "neutral"}`}>
+              {settingsFeedback}
+            </span>
+          )}
+        </div>
+        <div className="panel-body">
+          {STRATEGY_FIELDS.map(({ section, key, label, min, max, step, format, hotReload }) => (
+            <div key={`${section}.${key}`} className="slider-row">
+              <span className="slider-label">
+                {label}
+                {!hotReload && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>(초기화 필요)</span>}
+              </span>
+              <div className="slider-track">
+                <input
+                  type="range" min={min} max={max} step={step}
+                  value={form[section]?.[key] ?? min}
+                  onChange={(e) => handleSlider(section, key, Number(e.target.value))}
+                  disabled={!hotReload}
+                  style={{ opacity: hotReload ? 1 : 0.4 }}
+                />
+              </div>
+              <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
+            </div>
+          ))}
+          <div className="slider-buttons">
+            <button className="btn" onClick={handleSettingsReset} disabled={saving || !hasSettingsChanges()}>초기화</button>
+            <button className="btn btn-primary" onClick={handleSettingsApply} disabled={saving || !hasSettingsChanges()}>
+              {saving ? "적용 중..." : "적용"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
