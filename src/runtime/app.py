@@ -52,7 +52,7 @@ class App:
         self.settings = settings
         self.event_bus = EventBus()
         self.scheduler = Scheduler()
-        self.paused = False
+        self.paused = True
         self._db_lock = asyncio.Lock()
 
         # Infrastructure
@@ -203,7 +203,7 @@ class App:
 
     async def _retrain(self) -> None:
         """Retrain models for all screened markets."""
-        if self.paused or not self.screened_markets:
+        if not self.screened_markets:
             return
 
         logger.info("Starting periodic retrain for %d markets", len(self.screened_markets))
@@ -357,7 +357,7 @@ class App:
         logger.info("Screened %d coins: %s", len(results), self.screened_markets)
 
     async def _collect_and_predict(self) -> None:
-        if self.paused or not self.screened_markets:
+        if not self.screened_markets:
             return
 
         async with self._db_lock:
@@ -385,6 +385,9 @@ class App:
                     pass  # model not loaded
 
     async def _on_signal(self, event: SignalEvent) -> None:
+        if self.paused:
+            return
+
         from src.types.enums import SignalType
 
         signal_model = __import__("src.types.models", fromlist=["Signal"]).Signal(
