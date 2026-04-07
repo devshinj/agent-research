@@ -92,6 +92,8 @@ class App:
         )
         self.screened_markets: list[str] = []
         self.training_in_progress: dict[str, float] = {}  # market -> start epoch
+        self.trading_enabled = False
+        self._ws_outbox: list[dict[str, object]] = []
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -430,6 +432,12 @@ class App:
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
         elif event.signal_type == SignalType.SELL:
+            position = self.account.positions.get(event.market)
+            if position is None:
+                return
+            if position.trade_mode == "MANUAL":
+                logger.info("Skipping ML SELL for MANUAL position %s", event.market)
+                return
             tickers = await self.upbit.fetch_tickers([event.market])
             if not tickers:
                 return
@@ -447,6 +455,62 @@ class App:
             event.order.side.value, event.order.market, event.order.fill_price,
         )
         await self._save_state()
+
+    async def _monitor_positions(self) -> None:
+        """Check all open positions for exit conditions."""
+        if not self.account.positions:
+            return
+
+        markets = list(self.account.positions.keys())
+        tickers = await self.upbit.fetch_tickers(markets)
+        price_map: dict[str, Decimal] = {t["market"]: t["price"] for t in tickers}
+
+        exits: list[tuple[str, Decimal, str]] = []
+        partial_exits: list[tuple[str, Decimal, Decimal]] = []
+
+        for market, position in self.account.positions.items():
+            price = price_map.get(market)
+            if price is None:
+                continue
+
+            self.portfolio_manager.update_position(position, price)
+
+            if self.trading_enabled:
+                # MANUAL 포지션: 예약 손절/익절만 체크
+                if position.trade_mode == "MANUAL":
+                    manual_reason = self.portfolio_manager.check_manual_exit(position, price)
+                    if manual_reason is not None:
+                        exits.append((market, price, manual_reason))
+                    continue
+
+                # AUTO 포지션: 기존 로직
+                # 1. 손절 체크 (최우선)
+                pnl_pct = (price - position.entry_price) / position.entry_price
+                if pnl_pct <= -self.settings.risk.stop_loss_pct:
+                    exits.append((market, price, "STOP_LOSS"))
+                    continue
+                # 2. 부분 익절 체크
+                fraction = self.portfolio_manager.check_partial_exit(position, price)
+                if fraction is not None:
+                    partial_exits.append((market, price, fraction))
+                    continue
+                # 3. 전체 매도 조건 (트레일링, 전체 익절)
+                reason = self.portfolio_manager.check_exit_conditions(position, price)
+                if reason is not None:
+                    exits.append((market, price, reason))
+
+        for market, price, reason in exits:
+            order = self.paper_engine.execute_sell(self.account, market, price, reason)
+            await self.order_repo.save(order)
+            self.risk_manager.record_trade()
+            await self.event_bus.publish(TradeEvent(order, order.created_at))
+
+        for market, price, fraction in partial_exits:
+            order = self.paper_engine.execute_partial_sell(
+                self.account, market, price, fraction,
+            )
+            await self.order_repo.save(order)
+            await self.event_bus.publish(TradeEvent(order, order.created_at))
 
     async def _save_state(self) -> None:
         await self.portfolio_repo.save_account(self.account)
