@@ -86,6 +86,9 @@ class RiskManager:
     def record_win(self) -> None:
         self._consecutive_losses = 0
 
+    def record_daily_loss(self, loss_pct: Decimal) -> None:
+        self._daily_loss += loss_pct
+
     def record_trade(self) -> None:
         self._daily_trades += 1
 

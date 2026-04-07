@@ -28,6 +28,8 @@ class RiskConfig:
     max_daily_trades: int
     consecutive_loss_limit: int
     cooldown_minutes: int
+    partial_take_profit_pct: Decimal = Decimal("0.04")
+    partial_sell_fraction: Decimal = Decimal("0.5")
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,8 @@ class Settings:
                 max_daily_trades=int(raw["risk"]["max_daily_trades"]),
                 consecutive_loss_limit=int(raw["risk"]["consecutive_loss_limit"]),
                 cooldown_minutes=int(raw["risk"]["cooldown_minutes"]),
+                partial_take_profit_pct=Decimal(str(raw["risk"].get("partial_take_profit_pct", "0.04"))),
+                partial_sell_fraction=Decimal(str(raw["risk"].get("partial_sell_fraction", "0.5"))),
             ),
             screening=ScreeningConfig(
                 min_volume_krw=Decimal(str(raw["screening"]["min_volume_krw"])),
@@ -147,6 +151,8 @@ class Settings:
                 "max_daily_trades": self.risk.max_daily_trades,
                 "consecutive_loss_limit": self.risk.consecutive_loss_limit,
                 "cooldown_minutes": self.risk.cooldown_minutes,
+                "partial_take_profit_pct": float(self.risk.partial_take_profit_pct),
+                "partial_sell_fraction": float(self.risk.partial_sell_fraction),
             },
             "screening": {
                 "min_volume_krw": int(self.screening.min_volume_krw),

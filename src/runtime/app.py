@@ -94,6 +94,9 @@ class App:
         self.training_in_progress: dict[str, float] = {}  # market -> start epoch
         self.trading_enabled = False
         self._ws_outbox: list[dict[str, object]] = []
+        self._today_realized_pnl = Decimal("0")
+        self._today_wins = 0
+        self._today_losses = 0
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -500,9 +503,13 @@ class App:
                     exits.append((market, price, reason))
 
         for market, price, reason in exits:
+            position = self.account.positions[market]
+            entry_price = position.entry_price
+            quantity = position.quantity
             order = self.paper_engine.execute_sell(self.account, market, price, reason)
             await self.order_repo.save(order)
             self.risk_manager.record_trade()
+            self._record_trade_result(entry_price, price, quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
             self._ws_outbox.append({
                 "type": "order_filled",
@@ -515,10 +522,14 @@ class App:
             })
 
         for market, price, fraction in partial_exits:
+            position = self.account.positions[market]
+            entry_price = position.entry_price
+            sell_quantity = position.quantity * fraction
             order = self.paper_engine.execute_partial_sell(
                 self.account, market, price, fraction,
             )
             await self.order_repo.save(order)
+            self._record_trade_result(entry_price, price, sell_quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
             self._ws_outbox.append({
                 "type": "order_filled",
@@ -529,6 +540,22 @@ class App:
                     "price": str(order.fill_price),
                 },
             })
+
+    def _record_trade_result(
+        self, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
+    ) -> None:
+        """Record win or loss for circuit breaker, daily loss, and realized PnL."""
+        realized = (fill_price - entry_price) * quantity
+        self._today_realized_pnl += realized
+
+        if fill_price >= entry_price:
+            self.risk_manager.record_win()
+            self._today_wins += 1
+        else:
+            self.risk_manager.record_loss()
+            self._today_losses += 1
+            loss_pct = (entry_price - fill_price) / entry_price
+            self.risk_manager.record_daily_loss(loss_pct)
 
     async def _save_state(self) -> None:
         await self.portfolio_repo.save_account(self.account)
