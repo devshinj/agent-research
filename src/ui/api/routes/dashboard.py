@@ -88,4 +88,5 @@ async def get_summary(request: Request) -> dict:
         "total_return_pct": str(total_return_pct),
         "open_positions": len(account.positions),
         "initial_balance": str(initial_int),
+        "trading_enabled": app.trading_enabled,
     }

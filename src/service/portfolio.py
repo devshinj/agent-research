@@ -17,13 +17,23 @@ class PortfolioManager:
         if current_price > position.highest_price:
             position.highest_price = current_price
 
+    def check_partial_exit(self, position: Position, current_price: Decimal) -> Decimal | None:
+        """부분 익절 조건 체크. 매도할 비율(fraction)을 반환하거나 None."""
+        if position.partial_sold:
+            return None
+        pnl_pct = (current_price - position.entry_price) / position.entry_price
+        if pnl_pct >= self._risk.partial_take_profit_pct:
+            return self._risk.partial_sell_fraction
+        return None
+
     def check_exit_conditions(self, position: Position, current_price: Decimal) -> str | None:
         pnl_pct = (current_price - position.entry_price) / position.entry_price
 
         if pnl_pct <= -self._risk.stop_loss_pct:
             return "STOP_LOSS"
 
-        if position.highest_price > position.entry_price:
+        # 트레일링 스톱: 수익 상태에서만 발동 (평단 아래면 무시)
+        if current_price > position.entry_price and position.highest_price > position.entry_price:
             drop_from_high = (
                 (position.highest_price - current_price) / position.highest_price
             )

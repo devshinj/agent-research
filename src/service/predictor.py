@@ -32,12 +32,24 @@ class Predictor:
         self._min_confidence = value
 
     def load_model(self, market: str, model_path: Path) -> None:
-        self._models[market] = joblib.load(model_path)
         meta_path = model_path.with_suffix(".json")
+        meta: dict[str, Any] = {}
         if meta_path.exists():
-            self._model_meta[market] = json.loads(meta_path.read_text())
-        else:
-            self._model_meta[market] = {}
+            meta = json.loads(meta_path.read_text())
+
+        # Feature 불일치 감지: 모델이 학습된 feature 목록과 현재 FeatureBuilder 비교
+        model_features = meta.get("features")
+        current_features = self._fb.get_feature_names()
+        if model_features is not None and set(model_features) != set(current_features):
+            logger.warning(
+                "Feature mismatch for %s — model has %d features, builder has %d. "
+                "Skipping load (will retrain).",
+                market, len(model_features), len(current_features),
+            )
+            return
+
+        self._models[market] = joblib.load(model_path)
+        self._model_meta[market] = meta
         logger.info("Loaded model for %s from %s", market, model_path)
 
     def get_model_meta(self, market: str) -> dict[str, Any]:

@@ -53,7 +53,79 @@ class FeatureBuilder:
             )
         )
 
+        # ④ Multi-timeframe features (리샘플링)
+        if len(df) >= 60:
+            df_5m = self._resample(df, 5)
+            if len(df_5m) >= 14:
+                ema_30m = ta.trend.ema_indicator(df_5m["close"], window=6)  # 6 * 5min = 30min
+                features["ema_30m"] = self._align_higher_tf(ema_30m, df, 5)
+                rsi_5m = ta.momentum.rsi(df_5m["close"], window=14)
+                features["rsi_14_5m"] = self._align_higher_tf(rsi_5m, df, 5)
+            else:
+                features["ema_30m"] = np.nan
+                features["rsi_14_5m"] = np.nan
+        else:
+            features["ema_30m"] = np.nan
+            features["rsi_14_5m"] = np.nan
+
+        if len(df) >= 300:
+            df_15m = self._resample(df, 15)
+            if len(df_15m) >= 14:
+                ema_1h = ta.trend.ema_indicator(df_15m["close"], window=4)  # 4 * 15min = 1h
+                features["ema_1h"] = self._align_higher_tf(ema_1h, df, 15)
+                # trend_1h: 1이면 상승, -1이면 하락 (EMA 기울기)
+                ema_1h_diff = ema_1h.diff()
+                trend_1h = ema_1h_diff.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+                features["trend_1h"] = self._align_higher_tf(trend_1h, df, 15)
+            else:
+                features["ema_1h"] = np.nan
+                features["trend_1h"] = np.nan
+        else:
+            features["ema_1h"] = np.nan
+            features["trend_1h"] = np.nan
+
         return features
+
+    @staticmethod
+    def _resample(df: pd.DataFrame, minutes: int) -> pd.DataFrame:
+        """1분봉 DataFrame을 N분봉으로 리샘플링."""
+        n = len(df)
+        # 뒤에서부터 minutes 단위로 그룹
+        groups = n // minutes
+        if groups == 0:
+            return pd.DataFrame()
+        # 앞쪽 남는 행 버림
+        start = n - groups * minutes
+        trimmed = df.iloc[start:].reset_index(drop=True)
+
+        result_rows: list[dict[str, float]] = []
+        for i in range(groups):
+            chunk = trimmed.iloc[i * minutes : (i + 1) * minutes]
+            result_rows.append({
+                "open": chunk["open"].iloc[0],
+                "high": chunk["high"].max(),
+                "low": chunk["low"].min(),
+                "close": chunk["close"].iloc[-1],
+                "volume": chunk["volume"].sum(),
+            })
+        return pd.DataFrame(result_rows)
+
+    @staticmethod
+    def _align_higher_tf(
+        higher_series: pd.Series,  # type: ignore[type-arg]
+        df_1m: pd.DataFrame,
+        minutes: int,
+    ) -> pd.Series:  # type: ignore[type-arg]
+        """고시간축 시리즈를 1분봉 인덱스에 맞춰 forward-fill."""
+        n = len(df_1m)
+        groups = n // minutes
+        start = n - groups * minutes
+        result = pd.Series(np.nan, index=df_1m.index)
+        for i, val in enumerate(higher_series):
+            bar_start = start + i * minutes
+            bar_end = start + (i + 1) * minutes
+            result.iloc[bar_start:bar_end] = val
+        return result
 
     def get_feature_names(self) -> list[str]:
         return [
@@ -64,4 +136,6 @@ class FeatureBuilder:
             "bb_upper", "bb_lower", "bb_width",
             "ema_5_ratio", "ema_20_ratio", "ema_60_ratio",
             "volume_ratio_5m", "volume_ratio_20m", "volume_trend",
+            "ema_30m", "rsi_14_5m",
+            "ema_1h", "trend_1h",
         ]

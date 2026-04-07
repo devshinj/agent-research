@@ -34,6 +34,7 @@ interface SliderDef {
   section: "risk" | "paper_trading";
   key: string;
   label: string;
+  desc: string;
   min: number;
   max: number;
   step: number;
@@ -41,19 +42,19 @@ interface SliderDef {
 }
 
 const SLIDERS: SliderDef[] = [
-  { section: "risk", key: "stop_loss_pct", label: "손절 기준", min: 0.005, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
-  { section: "risk", key: "take_profit_pct", label: "전량 익절 기준", min: 0.02, max: 0.2, step: 0.01, format: (v) => `${(v * 100).toFixed(0)}%` },
-  { section: "risk", key: "trailing_stop_pct", label: "트레일링 스톱", min: 0.005, max: 0.05, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
-  { section: "risk", key: "partial_take_profit_pct", label: "부분 익절 기준", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
-  { section: "risk", key: "partial_sell_fraction", label: "부분 매도 비율", min: 0.1, max: 0.9, step: 0.1, format: (v) => `${(v * 100).toFixed(0)}%` },
-  { section: "risk", key: "max_daily_trades", label: "일일 최대 거래", min: 10, max: 500, step: 10, format: (v) => `${v}회` },
-  { section: "risk", key: "consecutive_loss_limit", label: "연속 손실 한도", min: 3, max: 20, step: 1, format: (v) => `${v}회` },
-  { section: "risk", key: "cooldown_minutes", label: "쿨다운 시간", min: 5, max: 120, step: 5, format: (v) => `${v}분` },
-  { section: "paper_trading", key: "max_position_pct", label: "포지션 최대 비중", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
-  { section: "paper_trading", key: "max_open_positions", label: "동시 포지션 수", min: 1, max: 10, step: 1, format: (v) => `${v}개` },
-  { section: "paper_trading", key: "max_additional_buys", label: "최대 추가매수 횟수", min: 0, max: 10, step: 1, format: (v) => `${v}회` },
-  { section: "paper_trading", key: "additional_buy_drop_pct", label: "추가매수 하락률", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
-  { section: "paper_trading", key: "additional_buy_ratio", label: "추가매수 비율", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "risk", key: "stop_loss_pct", label: "손절 기준", desc: "평균 매수가 대비 이 비율만큼 하락하면 즉시 전량 매도합니다", min: 0.005, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "risk", key: "take_profit_pct", label: "전량 익절 기준", desc: "평균 매수가 대비 이 비율만큼 상승하면 전량 매도합니다", min: 0.02, max: 0.2, step: 0.01, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "risk", key: "trailing_stop_pct", label: "트레일링 스톱", desc: "수익 상태에서 고점 대비 이 비율만큼 하락하면 매도합니다 (손실 상태에서는 발동하지 않음)", min: 0.005, max: 0.05, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "risk", key: "partial_take_profit_pct", label: "부분 익절 기준", desc: "평균 매수가 대비 이 비율 이상 수익이면 보유 수량의 일부를 먼저 매도합니다", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "risk", key: "partial_sell_fraction", label: "부분 매도 비율", desc: "부분 익절 시 보유 수량 중 매도할 비율입니다 (예: 50% = 절반 매도)", min: 0.1, max: 0.9, step: 0.1, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "risk", key: "max_daily_trades", label: "일일 최대 거래", desc: "하루에 실행할 수 있는 최대 거래 횟수입니다. 초과 시 매수가 차단됩니다", min: 10, max: 500, step: 10, format: (v) => `${v}회` },
+  { section: "risk", key: "consecutive_loss_limit", label: "연속 손실 한도", desc: "연속으로 이 횟수만큼 손실이 발생하면 서킷 브레이커가 발동됩니다", min: 3, max: 20, step: 1, format: (v) => `${v}회` },
+  { section: "risk", key: "cooldown_minutes", label: "쿨다운 시간", desc: "서킷 브레이커 발동 후 매매를 재개하기까지 대기하는 시간입니다", min: 5, max: 120, step: 5, format: (v) => `${v}분` },
+  { section: "paper_trading", key: "max_position_pct", label: "포지션 최대 비중", desc: "총 자산 대비 단일 포지션에 투자할 수 있는 최대 비율입니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "paper_trading", key: "max_open_positions", label: "동시 포지션 수", desc: "동시에 보유할 수 있는 최대 포지션(코인) 수입니다", min: 1, max: 10, step: 1, format: (v) => `${v}개` },
+  { section: "paper_trading", key: "max_additional_buys", label: "최대 추가매수 횟수", desc: "같은 코인에 대해 추가 매수(물타기)할 수 있는 최대 횟수입니다", min: 0, max: 10, step: 1, format: (v) => `${v}회` },
+  { section: "paper_trading", key: "additional_buy_drop_pct", label: "추가매수 하락률", desc: "평균 매수가 대비 이 비율 이상 하락해야 추가매수가 발동됩니다", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "paper_trading", key: "additional_buy_ratio", label: "추가매수 비율", desc: "추가매수 금액 = 기본 포지션 사이즈 x 이 비율입니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
 ];
 
 export default function Risk() {
@@ -289,9 +290,9 @@ export default function Risk() {
           )}
         </div>
         <div className="panel-body">
-          {SLIDERS.map(({ section, key, label, min, max, step, format }) => (
+          {SLIDERS.map(({ section, key, label, desc, min, max, step, format }) => (
             <div key={key} className="slider-row">
-              <span className="slider-label">{label}</span>
+              <span className="slider-label" data-tooltip={desc}>{label}</span>
               <div className="slider-track">
                 <input
                   type="range"

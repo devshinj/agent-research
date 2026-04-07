@@ -21,6 +21,7 @@ from src.repository.signal_repo import SignalRepository
 from src.runtime.event_bus import EventBus
 from src.runtime.scheduler import Scheduler
 from src.service.collector import Collector
+from src.service.entry_analyzer import EntryAnalyzer
 from src.service.features import FeatureBuilder
 from src.service.paper_engine import PaperEngine
 from src.service.portfolio import PortfolioManager
@@ -40,6 +41,7 @@ class App:
         "risk": {
             "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
             "max_daily_trades", "consecutive_loss_limit", "cooldown_minutes",
+            "partial_take_profit_pct", "partial_sell_fraction",
         },
         "strategy": {"min_confidence"},
         "screening": {
@@ -54,6 +56,7 @@ class App:
         self.event_bus = EventBus()
         self.scheduler = Scheduler()
         self.paused = True
+        self.trading_enabled = False
         self._db_lock = asyncio.Lock()
 
         # Infrastructure
@@ -75,6 +78,7 @@ class App:
         self.risk_manager = RiskManager(settings.risk, settings.paper_trading)
         self.paper_engine = PaperEngine(settings.paper_trading)
         self.portfolio_manager = PortfolioManager(settings.risk)
+        self.entry_analyzer = EntryAnalyzer(settings.entry_analyzer)
         self.trainer = Trainer(
             self.feature_builder,
             settings.data.model_dir,
@@ -90,6 +94,10 @@ class App:
         )
         self.screened_markets: list[str] = []
         self.training_in_progress: dict[str, float] = {}  # market -> start epoch
+        # Accumulated realized PnL for today's daily summary
+        self._today_realized_pnl = Decimal("0")
+        self._today_wins = 0
+        self._today_losses = 0
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -136,6 +144,10 @@ class App:
         await self._train_missing_models()
 
         # Schedule periodic tasks
+        self.scheduler.schedule_interval(
+            "monitor_positions", self._monitor_positions,
+            interval_seconds=30,
+        )
         self.scheduler.schedule_interval(
             "collect_candles", self._collect_and_predict,
             interval_seconds=60,
@@ -357,6 +369,69 @@ class App:
         await self.event_bus.publish(ScreenedCoinsEvent(results, 0))
         logger.info("Screened %d coins: %s", len(results), self.screened_markets)
 
+    async def _monitor_positions(self) -> None:
+        """Check open positions for stop-loss / take-profit / trailing-stop exits."""
+        if self.paused or not self.account.positions:
+            return
+
+        markets = list(self.account.positions.keys())
+        tickers = await self.upbit.fetch_tickers(markets)
+        price_map: dict[str, Decimal] = {t["market"]: t["price"] for t in tickers}
+
+        # Always update position prices (even when trading_enabled=False)
+        partial_exits: list[tuple[str, Decimal, Decimal]] = []  # (market, price, fraction)
+        exits: list[tuple[str, Decimal, str]] = []  # (market, price, reason)
+        for market, position in list(self.account.positions.items()):
+            price = price_map.get(market)
+            if price is None:
+                continue
+            self.portfolio_manager.update_position(position, price)
+            if self.trading_enabled:
+                # 1. 손절 체크 (최우선)
+                pnl_pct = (price - position.entry_price) / position.entry_price
+                if pnl_pct <= -self.settings.risk.stop_loss_pct:
+                    exits.append((market, price, "STOP_LOSS"))
+                    continue
+                # 2. 부분 익절 체크
+                fraction = self.portfolio_manager.check_partial_exit(position, price)
+                if fraction is not None:
+                    partial_exits.append((market, price, fraction))
+                    continue
+                # 3. 전체 매도 조건 (트레일링, 전체 익절)
+                reason = self.portfolio_manager.check_exit_conditions(position, price)
+                if reason is not None:
+                    exits.append((market, price, reason))
+
+        # Execute partial exits
+        for market, price, fraction in partial_exits:
+            if market not in self.account.positions:
+                continue
+            position = self.account.positions[market]
+            entry_price = position.entry_price
+            order = self.paper_engine.execute_partial_sell(
+                self.account, market, price, fraction,
+            )
+            await self.order_repo.save(order)
+            self.risk_manager.record_trade()
+            assert order.fill_price is not None  # always set for FILLED orders
+            self._record_trade_result(entry_price, order.fill_price, order.quantity)
+            await self.event_bus.publish(TradeEvent(order, order.created_at))
+            logger.info("Partial exit %s: %s @ %s (%.0f%%)", market, market, price, fraction * 100)
+
+        # Execute full exits
+        for market, price, reason in exits:
+            if market not in self.account.positions:
+                continue
+            position = self.account.positions[market]
+            entry_price = position.entry_price
+            quantity = position.quantity
+            order = self.paper_engine.execute_sell(self.account, market, price, reason)
+            await self.order_repo.save(order)
+            self.risk_manager.record_trade()
+            self._record_trade_result(entry_price, order.fill_price, quantity)
+            await self.event_bus.publish(TradeEvent(order, order.created_at))
+            logger.info("Auto-exit %s: %s @ %s", reason, market, price)
+
     async def _collect_and_predict(self) -> None:
         if not self.screened_markets:
             return
@@ -391,8 +466,24 @@ class App:
                 except KeyError:
                     pass  # model not loaded
 
+    def _record_trade_result(
+        self, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
+    ) -> None:
+        """Record win or loss for circuit breaker, daily loss, and realized PnL."""
+        realized = (fill_price - entry_price) * quantity
+        self._today_realized_pnl += realized
+
+        if fill_price >= entry_price:
+            self.risk_manager.record_win()
+            self._today_wins += 1
+        else:
+            self.risk_manager.record_loss()
+            self._today_losses += 1
+            loss_pct = (entry_price - fill_price) / entry_price
+            self.risk_manager.record_daily_loss(loss_pct)
+
     async def _on_signal(self, event: SignalEvent) -> None:
-        if self.paused:
+        if self.paused or not self.trading_enabled:
             return
 
         from src.types.enums import SignalType
@@ -406,13 +497,47 @@ class App:
             return
 
         if event.signal_type == SignalType.BUY:
+            existing = self.account.positions.get(event.market)
+            is_additional = existing is not None
+
+            # 추가매수: 하락률 조건 체크
+            if is_additional:
+                assert existing is not None  # narrowing for mypy
+                tickers = await self.upbit.fetch_tickers([event.market])
+                if not tickers:
+                    return
+                price = tickers[0]["price"]
+                if not self.risk_manager.should_additional_buy(existing, price):
+                    logger.info("추가매수 조건 미충족 for %s", event.market)
+                    return
+            else:
+                tickers = await self.upbit.fetch_tickers([event.market])
+                if not tickers:
+                    return
+                price = tickers[0]["price"]
+
+            # 저점 매수 스코어 체크 (신규 매수만)
+            if not is_additional:
+                async with self._db_lock:
+                    candles = await self.candle_repo.get_latest(
+                        event.market, f"{self.settings.collector.candle_timeframe}m",
+                    )
+                if len(candles) >= self.settings.entry_analyzer.price_lookback_candles:
+                    df = self._candles_to_df(candles)
+                    features = self.feature_builder.build(df)
+                    entry_score = self.entry_analyzer.score_entry(df, features)
+                    if entry_score < self.settings.entry_analyzer.min_entry_score:
+                        logger.info(
+                            "Entry score too low for %s: %.2f < %.2f",
+                            event.market, entry_score,
+                            self.settings.entry_analyzer.min_entry_score,
+                        )
+                        return
+
             invest = self.risk_manager.calculate_position_size(
                 self.account, Decimal(str(event.confidence)),
+                is_additional=is_additional,
             )
-            tickers = await self.upbit.fetch_tickers([event.market])
-            if not tickers:
-                return
-            price = tickers[0]["price"]
             order = self.paper_engine.execute_buy(
                 self.account, event.market, price, invest, event.confidence,
             )
@@ -425,11 +550,15 @@ class App:
             if not tickers:
                 return
             price = tickers[0]["price"]
+            position = self.account.positions[event.market]
+            entry_price = position.entry_price
+            quantity = position.quantity
             order = self.paper_engine.execute_sell(
                 self.account, event.market, price, "ML_SIGNAL",
             )
             await self.order_repo.save(order)
             self.risk_manager.record_trade()
+            self._record_trade_result(entry_price, order.fill_price, quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
     async def _on_trade(self, event: TradeEvent) -> None:
@@ -460,17 +589,16 @@ class App:
             self.account, current_prices,
         )
 
-        # Load existing summary to preserve starting_balance & accumulate stats
+        # Load existing summary to preserve starting_balance
         existing = await self.portfolio_repo.get_daily_summary(today)
         starting = existing.starting_balance if existing else total_equity
-        realized = existing.realized_pnl if existing else Decimal(0)
-        total_trades = existing.total_trades if existing else 0
-        win_trades = existing.win_trades if existing else 0
-        loss_trades = existing.loss_trades if existing else 0
 
-        # Update trade counts from last order
+        # Use live counters for realized PnL and win/loss
         risk_state = self.risk_manager.dump_state()
         total_trades = int(risk_state["daily_trades"])
+        realized = self._today_realized_pnl
+        win_trades = self._today_wins
+        loss_trades = self._today_losses
 
         # Max drawdown: track worst intraday dip from starting balance
         drawdown_pct = (

@@ -73,11 +73,13 @@ class PortfolioRepository:
         if account.positions:
             await self._db.conn.executemany(
                 """INSERT INTO positions
-                   (market, side, entry_price, quantity, entry_time, unrealized_pnl, highest_price)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (market, side, entry_price, quantity, entry_time, unrealized_pnl,
+                    highest_price, add_count, total_invested, partial_sold)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (market, p.side.value, str(p.entry_price), str(p.quantity),
-                     p.entry_time, str(p.unrealized_pnl), str(p.highest_price))
+                     p.entry_time, str(p.unrealized_pnl), str(p.highest_price),
+                     p.add_count, str(p.total_invested), int(p.partial_sold))
                     for market, p in account.positions.items()
                 ],
             )
@@ -94,7 +96,8 @@ class PortfolioRepository:
         cash_balance = Decimal(row[0])
 
         cursor = await self._db.conn.execute(
-            "SELECT market, side, entry_price, quantity, entry_time, unrealized_pnl, highest_price FROM positions"
+            "SELECT market, side, entry_price, quantity, entry_time, unrealized_pnl,"
+            " highest_price, add_count, total_invested, partial_sold FROM positions"
         )
         pos_rows = await cursor.fetchall()
         positions = {
@@ -106,6 +109,9 @@ class PortfolioRepository:
                 entry_time=int(r[4]),
                 unrealized_pnl=Decimal(r[5]),
                 highest_price=Decimal(r[6]),
+                add_count=int(r[7]),
+                total_invested=Decimal(r[8]),
+                partial_sold=bool(r[9]),
             )
             for r in pos_rows
         }

@@ -17,6 +17,9 @@ class PaperTradingConfig:
     fee_rate: Decimal
     slippage_rate: Decimal
     min_order_krw: int
+    max_additional_buys: int = 3
+    additional_buy_drop_pct: Decimal = Decimal("0.03")
+    additional_buy_ratio: Decimal = Decimal("0.5")
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,8 @@ class RiskConfig:
     max_daily_trades: int
     consecutive_loss_limit: int
     cooldown_minutes: int
+    partial_take_profit_pct: Decimal = Decimal("0.04")
+    partial_sell_fraction: Decimal = Decimal("0.5")
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,12 @@ class StrategyConfig:
     threshold_pct: Decimal
     retrain_interval_hours: int
     min_confidence: Decimal
+
+
+@dataclass(frozen=True)
+class EntryAnalyzerConfig:
+    min_entry_score: Decimal = Decimal("0.5")
+    price_lookback_candles: int = 60
 
 
 @dataclass(frozen=True)
@@ -72,6 +83,7 @@ class Settings:
     strategy: StrategyConfig
     collector: CollectorConfig
     data: DataConfig
+    entry_analyzer: EntryAnalyzerConfig = EntryAnalyzerConfig()
 
     @staticmethod
     def from_yaml(path: Path) -> Settings:
@@ -90,6 +102,9 @@ class Settings:
                 fee_rate=Decimal(str(raw["paper_trading"]["fee_rate"])),
                 slippage_rate=Decimal(str(raw["paper_trading"]["slippage_rate"])),
                 min_order_krw=int(raw["paper_trading"]["min_order_krw"]),
+                max_additional_buys=int(raw["paper_trading"].get("max_additional_buys", 3)),
+                additional_buy_drop_pct=Decimal(str(raw["paper_trading"].get("additional_buy_drop_pct", "0.03"))),
+                additional_buy_ratio=Decimal(str(raw["paper_trading"].get("additional_buy_ratio", "0.5"))),
             ),
             risk=RiskConfig(
                 stop_loss_pct=Decimal(str(raw["risk"]["stop_loss_pct"])),
@@ -99,6 +114,8 @@ class Settings:
                 max_daily_trades=int(raw["risk"]["max_daily_trades"]),
                 consecutive_loss_limit=int(raw["risk"]["consecutive_loss_limit"]),
                 cooldown_minutes=int(raw["risk"]["cooldown_minutes"]),
+                partial_take_profit_pct=Decimal(str(raw["risk"].get("partial_take_profit_pct", "0.04"))),
+                partial_sell_fraction=Decimal(str(raw["risk"].get("partial_sell_fraction", "0.5"))),
             ),
             screening=ScreeningConfig(
                 min_volume_krw=Decimal(str(raw["screening"]["min_volume_krw"])),
@@ -119,6 +136,10 @@ class Settings:
                 max_candles_per_market=int(raw["collector"]["max_candles_per_market"]),
                 market_refresh_interval_min=int(raw["collector"]["market_refresh_interval_min"]),
             ),
+            entry_analyzer=EntryAnalyzerConfig(
+                min_entry_score=Decimal(str(raw.get("entry_analyzer", {}).get("min_entry_score", "0.5"))),
+                price_lookback_candles=int(raw.get("entry_analyzer", {}).get("price_lookback_candles", 60)),
+            ),
             data=DataConfig(
                 db_path=str(raw["data"]["db_path"]),
                 model_dir=str(raw["data"]["model_dir"]),
@@ -138,6 +159,9 @@ class Settings:
                 "fee_rate": float(self.paper_trading.fee_rate),
                 "slippage_rate": float(self.paper_trading.slippage_rate),
                 "min_order_krw": self.paper_trading.min_order_krw,
+                "max_additional_buys": self.paper_trading.max_additional_buys,
+                "additional_buy_drop_pct": float(self.paper_trading.additional_buy_drop_pct),
+                "additional_buy_ratio": float(self.paper_trading.additional_buy_ratio),
             },
             "risk": {
                 "stop_loss_pct": float(self.risk.stop_loss_pct),
@@ -147,6 +171,8 @@ class Settings:
                 "max_daily_trades": self.risk.max_daily_trades,
                 "consecutive_loss_limit": self.risk.consecutive_loss_limit,
                 "cooldown_minutes": self.risk.cooldown_minutes,
+                "partial_take_profit_pct": float(self.risk.partial_take_profit_pct),
+                "partial_sell_fraction": float(self.risk.partial_sell_fraction),
             },
             "screening": {
                 "min_volume_krw": int(self.screening.min_volume_krw),
@@ -166,6 +192,10 @@ class Settings:
                 "candle_timeframe": self.collector.candle_timeframe,
                 "max_candles_per_market": self.collector.max_candles_per_market,
                 "market_refresh_interval_min": self.collector.market_refresh_interval_min,
+            },
+            "entry_analyzer": {
+                "min_entry_score": float(self.entry_analyzer.min_entry_score),
+                "price_lookback_candles": self.entry_analyzer.price_lookback_candles,
             },
             "data": {
                 "db_path": self.data.db_path,

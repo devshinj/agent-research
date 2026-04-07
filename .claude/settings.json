@@ -1,0 +1,21 @@
+{
+    "permissions": {
+      "allow": [
+        "Bash(cd *)",
+        "Bash(cd * && git * && git *)",
+        "Bash(cd * && git * | * | *)",
+        "Bash(cd * && git * | *)",
+        "Bash(cd * && git *)",
+        "Bash(cd * && uv run * | *)",
+        "Bash(cd * && uv run *)",
+        "Bash(cd * && cat *)",
+        "Bash(cd * && grep *)",
+        "Bash(cd * && pyproject*)",
+        "Bash(uv run * | *)",
+        "Bash(uv run *)",
+        "Bash(git * | * | *)",
+        "Bash(git * | *)",
+        "Bash(git *)"
+      ]
+    }
+  }

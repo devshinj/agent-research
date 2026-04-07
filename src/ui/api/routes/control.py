@@ -28,6 +28,33 @@ async def resume(request: Request) -> dict[str, str]:
     return {"status": "running"}
 
 
+@router.post("/trading/start")
+async def trading_start(request: Request) -> dict[str, str]:
+    app = getattr(request.app.state, "app", None)
+    if app is not None:
+        app.trading_enabled = True
+    return {"status": "trading_started"}
+
+
+@router.post("/trading/stop")
+async def trading_stop(request: Request) -> dict[str, str]:
+    app = getattr(request.app.state, "app", None)
+    if app is not None:
+        app.trading_enabled = False
+    return {"status": "trading_stopped"}
+
+
+@router.get("/status")
+async def get_status(request: Request) -> dict[str, object]:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"paused": True, "trading_enabled": False}
+    return {
+        "paused": app.paused,
+        "trading_enabled": app.trading_enabled,
+    }
+
+
 @router.get("/config")
 async def get_config(request: Request) -> dict[str, Any]:
     app = getattr(request.app.state, "app", None)

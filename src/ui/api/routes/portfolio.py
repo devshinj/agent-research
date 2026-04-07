@@ -46,6 +46,10 @@ async def get_positions(request: Request) -> list:
             "unrealized_pnl": str(unrealized_krw),
             "pnl_pct": str(pnl_pct),
             "eval_amount": str(eval_amount),
+            "add_count": pos.add_count,
+            "total_invested": str(_truncate_krw(pos.total_invested)),
+            "partial_sold": pos.partial_sold,
+            "highest_price": str(pos.highest_price),
         })
     return result
 

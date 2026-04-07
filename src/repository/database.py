@@ -64,7 +64,10 @@ CREATE TABLE IF NOT EXISTS positions (
     quantity       TEXT NOT NULL,
     entry_time     INTEGER NOT NULL,
     unrealized_pnl TEXT NOT NULL,
-    highest_price  TEXT NOT NULL
+    highest_price  TEXT NOT NULL,
+    add_count      INTEGER NOT NULL DEFAULT 0,
+    total_invested TEXT NOT NULL DEFAULT '0',
+    partial_sold   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS risk_state (

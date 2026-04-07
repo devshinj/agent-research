@@ -25,6 +25,9 @@ class Position:
     entry_time: int
     unrealized_pnl: Decimal
     highest_price: Decimal
+    add_count: int = 0
+    total_invested: Decimal = field(default_factory=lambda: Decimal("0"))
+    partial_sold: bool = False
 
 
 @dataclass
