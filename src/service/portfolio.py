@@ -35,6 +35,16 @@ class PortfolioManager:
 
         return None
 
+    def check_manual_exit(self, position: Position, current_price: Decimal) -> str | None:
+        """Check MANUAL position exit orders. Returns reason or None."""
+        if position.trade_mode != "MANUAL":
+            return None
+        if position.stop_loss_price is not None and current_price <= position.stop_loss_price:
+            return "MANUAL_STOP_LOSS"
+        if position.take_profit_price is not None and current_price >= position.take_profit_price:
+            return "MANUAL_TAKE_PROFIT"
+        return None
+
     def calculate_total_equity(
         self, account: PaperAccount, current_prices: dict[str, Decimal]
     ) -> Decimal:

@@ -57,6 +57,18 @@ class UpbitClient:
             resp.raise_for_status()
         return [self.parse_candle(raw, f"{timeframe}m") for raw in resp.json()]
 
+    async def fetch_daily_candles(
+        self, market: str, count: int = 200
+    ) -> list[Candle]:
+        client = await self._get_http()
+        async with self._semaphore:
+            resp = await client.get(
+                "/candles/days",
+                params={"market": market, "count": count},
+            )
+            resp.raise_for_status()
+        return [self.parse_candle(raw, "1D") for raw in resp.json()]
+
     async def fetch_tickers(self, markets: list[str]) -> list[dict[str, Any]]:
         client = await self._get_http()
         async with self._semaphore:
