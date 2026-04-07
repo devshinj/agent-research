@@ -747,7 +747,7 @@ input[type="range"]::-moz-range-thumb {
   font-size: 12px;
 }
 
-.signal-row:hover .signal-tooltip {
+.signal-row:hover > td > .signal-tooltip {
   display: block;
 }
 

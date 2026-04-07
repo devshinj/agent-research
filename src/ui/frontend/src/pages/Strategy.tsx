@@ -206,7 +206,7 @@ export default function Strategy() {
                       {s.signal_type}
                     </span>
                   </td>
-                  <td>
+                  <td style={{ position: "relative" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div className="progress-bar" style={{ flex: 1, maxWidth: 80 }}>
                         <div
