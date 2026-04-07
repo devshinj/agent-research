@@ -85,6 +85,15 @@ async def manual_buy(request: Request, body: BuyRequest) -> dict:
     await app.order_repo.save(order)
     app.risk_manager.record_trade()
     await app._save_state()
+    app._ws_outbox.append({
+        "type": "order_filled",
+        "data": {
+            "market": order.market,
+            "side": order.side.value,
+            "reason": order.reason,
+            "price": str(order.fill_price),
+        },
+    })
 
     pos = app.account.positions.get(body.market)
     return {
@@ -135,6 +144,15 @@ async def manual_sell(request: Request, body: SellRequest) -> dict:
     assert order.fill_price is not None
     app._record_trade_result(entry_price, order.fill_price, quantity if fraction >= Decimal("1") else order.quantity)
     await app._save_state()
+    app._ws_outbox.append({
+        "type": "order_filled",
+        "data": {
+            "market": order.market,
+            "side": order.side.value,
+            "reason": order.reason,
+            "price": str(order.fill_price),
+        },
+    })
 
     pos = app.account.positions.get(body.market)
     return {

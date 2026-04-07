@@ -504,6 +504,15 @@ class App:
             await self.order_repo.save(order)
             self.risk_manager.record_trade()
             await self.event_bus.publish(TradeEvent(order, order.created_at))
+            self._ws_outbox.append({
+                "type": "order_filled",
+                "data": {
+                    "market": order.market,
+                    "side": order.side.value,
+                    "reason": order.reason,
+                    "price": str(order.fill_price),
+                },
+            })
 
         for market, price, fraction in partial_exits:
             order = self.paper_engine.execute_partial_sell(
@@ -511,6 +520,15 @@ class App:
             )
             await self.order_repo.save(order)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
+            self._ws_outbox.append({
+                "type": "order_filled",
+                "data": {
+                    "market": order.market,
+                    "side": order.side.value,
+                    "reason": order.reason,
+                    "price": str(order.fill_price),
+                },
+            })
 
     async def _save_state(self) -> None:
         await self.portfolio_repo.save_account(self.account)

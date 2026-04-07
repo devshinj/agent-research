@@ -66,6 +66,11 @@ def create_app() -> FastAPI:
                         "data": {"upbit": app_instance.upbit_ws.status},
                     })
 
+                # Relay queued events (order fills, etc.)
+                if app_instance and hasattr(app_instance, "_ws_outbox"):
+                    while app_instance._ws_outbox:
+                        messages.append(app_instance._ws_outbox.pop(0))
+
                 for msg in messages:
                     await ws.send_text(json.dumps(msg))
                 await asyncio.sleep(1)
