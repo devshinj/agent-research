@@ -60,6 +60,13 @@ class Signal:
 
 
 @dataclass(frozen=True)
+class SignalBasis:
+    """Top contributing features for a signal prediction (SHAP values)."""
+    top_features: tuple[tuple[str, float, float], ...]
+    # Each tuple: (feature_name, shap_value, feature_value)
+
+
+@dataclass(frozen=True)
 class ScreeningResult:
     market: str
     korean_name: str

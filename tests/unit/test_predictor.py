@@ -7,6 +7,7 @@ from src.service.trainer import Trainer
 from src.service.predictor import Predictor
 from src.service.features import FeatureBuilder
 from src.types.enums import SignalType
+from src.types.models import SignalBasis
 
 
 def make_data(n=500):
@@ -30,23 +31,31 @@ def trained_model(tmp_path):
     return result["model_path"]
 
 
-def test_predictor_returns_signal(trained_model):
+def test_predictor_returns_signal_and_basis(trained_model):
     fb = FeatureBuilder()
     predictor = Predictor(fb, min_confidence=0.0)
     predictor.load_model("KRW-BTC", trained_model)
     df = make_data(200)
-    signal = predictor.predict("KRW-BTC", df)
+    signal, basis = predictor.predict("KRW-BTC", df)
     assert signal.signal_type in (SignalType.BUY, SignalType.SELL, SignalType.HOLD)
     assert 0 <= signal.confidence <= 1
+    assert isinstance(basis, SignalBasis)
+    if signal.signal_type != SignalType.HOLD:
+        assert len(basis.top_features) == 5
+        for name, shap_val, feat_val in basis.top_features:
+            assert isinstance(name, str)
+            assert isinstance(shap_val, float)
+            assert isinstance(feat_val, float)
 
 
-def test_predictor_hold_on_low_confidence(trained_model):
+def test_predictor_hold_returns_empty_basis(trained_model):
     fb = FeatureBuilder()
     predictor = Predictor(fb, min_confidence=0.99)
     predictor.load_model("KRW-BTC", trained_model)
     df = make_data(200)
-    signal = predictor.predict("KRW-BTC", df)
+    signal, basis = predictor.predict("KRW-BTC", df)
     assert signal.signal_type == SignalType.HOLD
+    assert basis.top_features == ()
 
 
 def test_predictor_no_model_raises():
@@ -54,3 +63,14 @@ def test_predictor_no_model_raises():
     predictor = Predictor(fb, min_confidence=0.6)
     with pytest.raises(KeyError):
         predictor.predict("KRW-NONE", make_data(200))
+
+
+def test_predictor_basis_sorted_by_abs_shap(trained_model):
+    fb = FeatureBuilder()
+    predictor = Predictor(fb, min_confidence=0.0)
+    predictor.load_model("KRW-BTC", trained_model)
+    df = make_data(200)
+    signal, basis = predictor.predict("KRW-BTC", df)
+    if signal.signal_type != SignalType.HOLD and len(basis.top_features) > 1:
+        abs_shaps = [abs(s) for _, s, _ in basis.top_features]
+        assert abs_shaps == sorted(abs_shaps, reverse=True)

@@ -11,12 +11,42 @@ interface ScreeningResult {
   score: number;
 }
 
+interface BasisEntry {
+  feature: string;
+  shap: number;
+  value: number;
+}
+
 interface Signal {
   market: string;
   signal_type: string;
   confidence: number;
   created_at: string;
+  basis: BasisEntry[] | null;
 }
+
+const FEATURE_LABELS: Record<string, string> = {
+  return_1m: "1분 수익률",
+  return_5m: "5분 수익률",
+  return_15m: "15분 수익률",
+  return_60m: "60분 수익률",
+  high_low_ratio: "고저 비율",
+  close_position: "종가 위치",
+  rsi_14: "RSI(14)",
+  rsi_7: "RSI(7)",
+  macd: "MACD",
+  macd_signal: "MACD 시그널",
+  macd_hist: "MACD 히스토그램",
+  bb_upper: "볼린저 상단",
+  bb_lower: "볼린저 하단",
+  bb_width: "볼린저 폭",
+  ema_5_ratio: "EMA(5) 비율",
+  ema_20_ratio: "EMA(20) 비율",
+  ema_60_ratio: "EMA(60) 비율",
+  volume_ratio_5m: "거래량(5분)",
+  volume_ratio_20m: "거래량(20분)",
+  volume_trend: "거래량 추세",
+};
 
 interface ModelInfo {
   accuracy: number;
@@ -168,7 +198,7 @@ export default function Strategy() {
             </thead>
             <tbody>
               {signals.map((s, i) => (
-                <tr key={i}>
+                <tr key={i} className="signal-row">
                   <td>{s.created_at}</td>
                   <td style={{ color: "var(--text)", fontWeight: 600 }}>{s.market}</td>
                   <td>
@@ -187,6 +217,29 @@ export default function Strategy() {
                       <span>{(s.confidence * 100).toFixed(0)}%</span>
                     </div>
                   </td>
+                  {s.basis && (
+                    <td style={{ padding: 0, position: "relative" }}>
+                      <div className="signal-tooltip">
+                        <div className="signal-tooltip-title">신호 근거</div>
+                        {s.basis.map((b) => (
+                          <div key={b.feature} className="signal-tooltip-row">
+                            <span className={`signal-tooltip-arrow ${b.shap >= 0 ? "up" : "down"}`}>
+                              {b.shap >= 0 ? "\u2191" : "\u2193"}
+                            </span>
+                            <span className="signal-tooltip-name">
+                              {FEATURE_LABELS[b.feature] ?? b.feature}
+                            </span>
+                            <span className="signal-tooltip-val">
+                              {Math.abs(b.value) >= 1 ? b.value.toFixed(1) : b.value.toFixed(4)}
+                            </span>
+                            <span className={`signal-tooltip-shap ${b.shap >= 0 ? "positive" : "negative"}`}>
+                              {b.shap >= 0 ? "+" : ""}{b.shap.toFixed(3)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

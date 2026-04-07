@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS signals (
     signal_type TEXT NOT NULL,
     confidence  REAL NOT NULL,
     timestamp   INTEGER NOT NULL,
-    outcome     TEXT
+    outcome     TEXT,
+    basis       TEXT
 );
 """
 

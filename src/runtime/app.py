@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import logging
 import time
 from collections.abc import Sequence
@@ -373,10 +374,16 @@ class App:
                 df = self._candles_to_df(candles)
 
                 try:
-                    signal = self.predictor.predict(market, df)
+                    signal, basis = self.predictor.predict(market, df)
+                    basis_json: str | None = None
+                    if basis.top_features:
+                        basis_json = json.dumps([
+                            {"feature": f, "shap": round(s, 4), "value": round(v, 4)}
+                            for f, s, v in basis.top_features
+                        ])
                     await self.signal_repo.save(
                         signal.market, signal.signal_type.name,
-                        signal.confidence, signal.timestamp,
+                        signal.confidence, signal.timestamp, basis_json,
                     )
                     await self.event_bus.publish(SignalEvent(
                         signal.market, signal.signal_type, signal.confidence, signal.timestamp,
