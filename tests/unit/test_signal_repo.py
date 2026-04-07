@@ -54,3 +54,31 @@ async def test_get_stats_empty_market(signal_repo):
     assert stats["sell_count"] == 0
     assert stats["hold_count"] == 0
     assert stats["avg_confidence"] == 0.0
+
+
+import json
+
+
+async def test_save_and_get_with_basis(signal_repo):
+    basis_json = json.dumps([
+        {"feature": "rsi_14", "shap": 0.15, "value": 72.3},
+        {"feature": "volume_ratio_5m", "shap": 0.12, "value": 2.4},
+    ])
+    await signal_repo.save("KRW-BTC", "BUY", 0.82, 1700000000, basis_json)
+    await signal_repo.save("KRW-ETH", "SELL", 0.65, 1700000001, None)
+
+    results = await signal_repo.get_recent(limit=10)
+    assert len(results) == 2
+
+    # KRW-ETH is newer
+    assert results[0]["basis"] is None
+    # KRW-BTC has basis
+    assert results[1]["basis"] == basis_json
+
+
+async def test_save_without_basis_backward_compat(signal_repo):
+    """Existing callers can still call save without basis argument."""
+    await signal_repo.save("KRW-BTC", "BUY", 0.75, 1700000000)
+    results = await signal_repo.get_recent(limit=10)
+    assert len(results) == 1
+    assert results[0]["basis"] is None

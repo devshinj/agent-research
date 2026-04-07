@@ -12,11 +12,12 @@ class SignalRepository:
 
     async def save(
         self, market: str, signal_type: str, confidence: float, timestamp: int,
+        basis: str | None = None,
     ) -> None:
         await self._db.conn.execute(
-            "INSERT INTO signals (market, signal_type, confidence, timestamp) "
-            "VALUES (?, ?, ?, ?)",
-            (market, signal_type, confidence, timestamp),
+            "INSERT INTO signals (market, signal_type, confidence, timestamp, basis) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (market, signal_type, confidence, timestamp, basis),
         )
         await self._db.conn.commit()
 
@@ -25,13 +26,13 @@ class SignalRepository:
     ) -> list[dict[str, object]]:
         if include_hold:
             cursor = await self._db.conn.execute(
-                "SELECT market, signal_type, confidence, timestamp "
+                "SELECT market, signal_type, confidence, timestamp, basis "
                 "FROM signals ORDER BY timestamp DESC LIMIT ?",
                 (limit,),
             )
         else:
             cursor = await self._db.conn.execute(
-                "SELECT market, signal_type, confidence, timestamp "
+                "SELECT market, signal_type, confidence, timestamp, basis "
                 "FROM signals WHERE signal_type != 'HOLD' "
                 "ORDER BY timestamp DESC LIMIT ?",
                 (limit,),
@@ -43,6 +44,7 @@ class SignalRepository:
                 "signal_type": r[1],
                 "confidence": r[2],
                 "timestamp": r[3],
+                "basis": r[4],
             }
             for r in rows
         ]
