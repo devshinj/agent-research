@@ -73,11 +73,15 @@ class PortfolioRepository:
         if account.positions:
             await self._db.conn.executemany(
                 """INSERT INTO positions
-                   (market, side, entry_price, quantity, entry_time, unrealized_pnl, highest_price)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (market, side, entry_price, quantity, entry_time, unrealized_pnl,
+                    highest_price, trade_mode, stop_loss_price, take_profit_price)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (market, p.side.value, str(p.entry_price), str(p.quantity),
-                     p.entry_time, str(p.unrealized_pnl), str(p.highest_price))
+                     p.entry_time, str(p.unrealized_pnl), str(p.highest_price),
+                     p.trade_mode,
+                     str(p.stop_loss_price) if p.stop_loss_price is not None else None,
+                     str(p.take_profit_price) if p.take_profit_price is not None else None)
                     for market, p in account.positions.items()
                 ],
             )
@@ -94,7 +98,9 @@ class PortfolioRepository:
         cash_balance = Decimal(row[0])
 
         cursor = await self._db.conn.execute(
-            "SELECT market, side, entry_price, quantity, entry_time, unrealized_pnl, highest_price FROM positions"
+            """SELECT market, side, entry_price, quantity, entry_time, unrealized_pnl,
+                      highest_price, trade_mode, stop_loss_price, take_profit_price
+               FROM positions"""
         )
         pos_rows = await cursor.fetchall()
         positions = {
@@ -106,6 +112,9 @@ class PortfolioRepository:
                 entry_time=int(r[4]),
                 unrealized_pnl=Decimal(r[5]),
                 highest_price=Decimal(r[6]),
+                trade_mode=str(r[7]),
+                stop_loss_price=Decimal(r[8]) if r[8] is not None else None,
+                take_profit_price=Decimal(r[9]) if r[9] is not None else None,
             )
             for r in pos_rows
         }

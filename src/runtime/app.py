@@ -29,6 +29,7 @@ from src.service.risk_manager import RiskManager
 from src.service.screener import Screener
 from src.service.trainer import Trainer
 from src.service.upbit_client import UpbitClient
+from src.service.upbit_ws import UpbitWebSocketService
 from src.types.events import ScreenedCoinsEvent, SignalEvent, TradeEvent
 from src.types.models import Candle, DailySummary, PaperAccount
 
@@ -65,6 +66,7 @@ class App:
 
         # Services
         self.upbit = UpbitClient()
+        self.upbit_ws = UpbitWebSocketService(self.upbit)
         self.collector = Collector(
             self.upbit, self.candle_repo,
             settings.collector.candle_timeframe, settings.collector.max_candles_per_market,
@@ -153,6 +155,12 @@ class App:
             interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
         )
 
+        # Start Upbit WebSocket for live ticker data
+        all_markets = self.collector.markets
+        if all_markets:
+            await self.upbit_ws.start(all_markets)
+            logger.info("Upbit WebSocket started for %d markets", len(all_markets))
+
         logger.info("App started. Seed: %s KRW", self.settings.paper_trading.initial_balance)
 
     async def _load_existing_models(self) -> int:
@@ -234,6 +242,7 @@ class App:
     async def stop(self) -> None:
         await self._save_state()
         await self.scheduler.cancel_all()
+        await self.upbit_ws.stop()
         await self.upbit.close()
         await self.db.close()
         logger.info("App stopped.")
