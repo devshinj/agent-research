@@ -1,14 +1,40 @@
+import { useState, useEffect, useCallback } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Dashboard from "./pages/Dashboard";
-import Charts from "./pages/Charts";
-import Portfolio from "./pages/Portfolio";
 import Strategy from "./pages/Strategy";
 import Risk from "./pages/Risk";
-import Settings from "./pages/Settings";
+import System from "./pages/System";
 
 function App() {
   const { isConnected } = useWebSocket("ws://localhost:8000/ws/live");
+  const [tradingEnabled, setTradingEnabled] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/control/status");
+      if (res.ok) {
+        const data = await res.json();
+        setTradingEnabled(data.trading_enabled);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    const id = setInterval(fetchStatus, 5000);
+    return () => clearInterval(id);
+  }, [fetchStatus]);
+
+  const toggleTrading = async () => {
+    const endpoint = tradingEnabled ? "/api/control/trading/stop" : "/api/control/trading/start";
+    try {
+      const res = await fetch(endpoint, { method: "POST" });
+      if (res.ok) {
+        setTradingEnabled(!tradingEnabled);
+      }
+    } catch { /* ignore */ }
+  };
 
   return (
     <BrowserRouter>
@@ -28,18 +54,6 @@ function App() {
               </NavLink>
             </li>
             <li>
-              <NavLink to="/charts">
-                <span className="nav-icon">&#9644;</span>
-                차트
-              </NavLink>
-            </li>
-            <li>
-              <NavLink to="/portfolio">
-                <span className="nav-icon">&#9670;</span>
-                포트폴리오
-              </NavLink>
-            </li>
-            <li>
               <NavLink to="/strategy">
                 <span className="nav-icon">&#9650;</span>
                 전략
@@ -52,12 +66,21 @@ function App() {
               </NavLink>
             </li>
             <li>
-              <NavLink to="/settings">
+              <NavLink to="/system">
                 <span className="nav-icon">&#9881;</span>
-                설정
+                시스템
               </NavLink>
             </li>
           </ul>
+
+          <div className="sidebar-trading">
+            <button
+              className={`trading-toggle ${tradingEnabled ? "active" : ""}`}
+              onClick={toggleTrading}
+            >
+              {tradingEnabled ? "매매 중지" : "매매 시작"}
+            </button>
+          </div>
 
           <div className="sidebar-status">
             <span className={`status-dot ${isConnected ? "live" : "offline"}`} />
@@ -71,11 +94,9 @@ function App() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/charts" element={<Charts />} />
-            <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/strategy" element={<Strategy />} />
             <Route path="/risk" element={<Risk />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/system" element={<System />} />
           </Routes>
         </main>
       </div>
