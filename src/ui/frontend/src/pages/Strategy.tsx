@@ -206,7 +206,7 @@ export default function Strategy() {
                       {s.signal_type}
                     </span>
                   </td>
-                  <td>
+                  <td style={{ position: "relative" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div className="progress-bar" style={{ flex: 1, maxWidth: 80 }}>
                         <div
@@ -216,9 +216,7 @@ export default function Strategy() {
                       </div>
                       <span>{(s.confidence * 100).toFixed(0)}%</span>
                     </div>
-                  </td>
-                  {s.basis && (
-                    <td style={{ padding: 0, position: "relative" }}>
+                    {s.basis && (
                       <div className="signal-tooltip">
                         <div className="signal-tooltip-title">신호 근거</div>
                         {s.basis.map((b) => (
@@ -238,8 +236,8 @@ export default function Strategy() {
                           </div>
                         ))}
                       </div>
-                    </td>
-                  )}
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
