@@ -438,6 +438,7 @@ class App:
 
     async def _collect_and_predict(self) -> None:
         if not self.screened_markets:
+            logger.warning("No screened markets — skipping signal generation")
             return
 
         async with self._db_lock:
@@ -448,6 +449,10 @@ class App:
                     market, f"{self.settings.collector.candle_timeframe}m"
                 )
                 if len(candles) < 60:
+                    logger.warning(
+                        "%s: insufficient candles (%d/60) — skipping prediction",
+                        market, len(candles),
+                    )
                     continue
 
                 df = self._candles_to_df(candles)
@@ -468,7 +473,7 @@ class App:
                         signal.market, signal.signal_type, signal.confidence, signal.timestamp,
                     ))
                 except KeyError:
-                    pass  # model not loaded
+                    logger.warning("%s: no trained model loaded — skipping prediction", market)
 
     async def _on_signal(self, event: SignalEvent) -> None:
         if self.paused or not self.trading_enabled:
