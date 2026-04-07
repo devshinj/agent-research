@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Dashboard from "./pages/Dashboard";
+import Exchange from "./pages/Exchange";
 import Strategy from "./pages/Strategy";
 import Risk from "./pages/Risk";
 import System from "./pages/System";
@@ -70,6 +71,11 @@ function App() {
               </NavLink>
             </li>
             <li>
+              <NavLink to="/exchange" className={({ isActive }) => (isActive ? "active" : "")}>
+                <span className="nav-icon">◇</span> 거래소
+              </NavLink>
+            </li>
+            <li>
               <NavLink to="/strategy">
                 <span className="nav-icon">&#9650;</span>
                 전략
@@ -110,6 +116,7 @@ function App() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/exchange" element={<Exchange />} />
             <Route path="/strategy" element={<Strategy />} />
             <Route path="/risk" element={<Risk />} />
             <Route path="/system" element={<System />} />
