@@ -50,6 +50,7 @@ class PaperEngine:
         current_price: Decimal,
         invest_amount: Decimal,
         confidence: float,
+        reason: str | None = None,
     ) -> Order:
         fill_price = current_price * (_ONE + self._config.slippage_rate)
         quantity = _quantize_quantity(invest_amount, fill_price)
@@ -60,15 +61,34 @@ class PaperEngine:
 
         account.cash_balance -= total_cost
 
-        account.positions[market] = Position(
-            market=market,
-            side=OrderSide.BUY,
-            entry_price=fill_price,
-            quantity=quantity,
-            entry_time=now,
-            unrealized_pnl=_ZERO,
-            highest_price=fill_price,
-        )
+        trade_mode = "MANUAL" if reason == "MANUAL" else "AUTO"
+
+        existing = account.positions.get(market)
+        if existing is not None:
+            # Additional buy: compute weighted average entry price
+            total_qty = existing.quantity + quantity
+            avg_price = (
+                (existing.entry_price * existing.quantity + fill_price * quantity)
+                / total_qty
+            )
+            existing.entry_price = avg_price
+            existing.quantity = total_qty
+            existing.highest_price = max(existing.highest_price, fill_price)
+            if reason == "MANUAL":
+                existing.trade_mode = "MANUAL"
+            order_reason = reason if reason else "ADDITIONAL_BUY"
+        else:
+            account.positions[market] = Position(
+                market=market,
+                side=OrderSide.BUY,
+                entry_price=fill_price,
+                quantity=quantity,
+                entry_time=now,
+                unrealized_pnl=_ZERO,
+                highest_price=fill_price,
+                trade_mode=trade_mode,
+            )
+            order_reason = reason if reason else "ML_SIGNAL"
 
         return Order(
             id=str(uuid.uuid4()),
@@ -79,7 +99,7 @@ class PaperEngine:
             quantity=quantity,
             status=OrderStatus.FILLED,
             signal_confidence=confidence,
-            reason="ML_SIGNAL",
+            reason=order_reason,
             created_at=now,
             fill_price=fill_price,
             filled_at=now,
@@ -114,6 +134,48 @@ class PaperEngine:
             status=OrderStatus.FILLED,
             signal_confidence=0,
             reason=reason,
+            created_at=now,
+            fill_price=fill_price,
+            filled_at=now,
+            fee=fee,
+        )
+
+    def execute_partial_sell(
+        self,
+        account: PaperAccount,
+        market: str,
+        current_price: Decimal,
+        sell_ratio: Decimal,
+        reason: str | None = None,
+    ) -> Order:
+        position = account.positions[market]
+        sell_quantity = (position.quantity * sell_ratio).quantize(
+            Decimal("0.00000001"), rounding=ROUND_DOWN,
+        )
+        fill_price = current_price * (_ONE - self._config.slippage_rate)
+        proceeds = _truncate_krw(fill_price * sell_quantity)
+        fee = _truncate_krw(proceeds * self._config.fee_rate)
+        net_proceeds = proceeds - fee
+        now = int(time.time())
+
+        account.cash_balance += net_proceeds
+        position.quantity -= sell_quantity
+
+        if position.quantity <= _ZERO:
+            del account.positions[market]
+
+        order_reason = reason if reason else "PARTIAL_TAKE_PROFIT"
+
+        return Order(
+            id=str(uuid.uuid4()),
+            market=market,
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            price=current_price,
+            quantity=sell_quantity,
+            status=OrderStatus.FILLED,
+            signal_confidence=0,
+            reason=order_reason,
             created_at=now,
             fill_price=fill_price,
             filled_at=now,
