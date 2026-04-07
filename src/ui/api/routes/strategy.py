@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -49,6 +50,7 @@ async def get_signals(
             "created_at": datetime.fromtimestamp(
                 r["timestamp"], tz=UTC,
             ).strftime("%Y-%m-%d %H:%M:%S"),
+            "basis": json.loads(r["basis"]) if r.get("basis") else None,
         }
         for r in rows
     ]
