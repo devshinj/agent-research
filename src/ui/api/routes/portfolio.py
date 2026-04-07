@@ -50,6 +50,9 @@ async def get_positions(request: Request) -> list:
             "total_invested": str(_truncate_krw(pos.total_invested)),
             "partial_sold": pos.partial_sold,
             "highest_price": str(pos.highest_price),
+            "trade_mode": pos.trade_mode,
+            "stop_loss_price": str(pos.stop_loss_price) if pos.stop_loss_price else None,
+            "take_profit_price": str(pos.take_profit_price) if pos.take_profit_price else None,
         })
     return result
 
@@ -80,6 +83,7 @@ async def get_history(request: Request, page: int = 1, size: int = 20) -> dict:
             "quantity": str(o.quantity),
             "price": str(fill_price),
             "total_amount": str(total_amount),
+            "reason": o.reason,
         })
 
     total = await app.order_repo.count_since(0)

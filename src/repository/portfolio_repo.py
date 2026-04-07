@@ -74,12 +74,16 @@ class PortfolioRepository:
             await self._db.conn.executemany(
                 """INSERT INTO positions
                    (market, side, entry_price, quantity, entry_time, unrealized_pnl,
-                    highest_price, add_count, total_invested, partial_sold)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    highest_price, add_count, total_invested, partial_sold,
+                    trade_mode, stop_loss_price, take_profit_price)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (market, p.side.value, str(p.entry_price), str(p.quantity),
                      p.entry_time, str(p.unrealized_pnl), str(p.highest_price),
-                     p.add_count, str(p.total_invested), int(p.partial_sold))
+                     p.add_count, str(p.total_invested), int(p.partial_sold),
+                     p.trade_mode,
+                     str(p.stop_loss_price) if p.stop_loss_price is not None else None,
+                     str(p.take_profit_price) if p.take_profit_price is not None else None)
                     for market, p in account.positions.items()
                 ],
             )
@@ -97,7 +101,8 @@ class PortfolioRepository:
 
         cursor = await self._db.conn.execute(
             "SELECT market, side, entry_price, quantity, entry_time, unrealized_pnl,"
-            " highest_price, add_count, total_invested, partial_sold FROM positions"
+            " highest_price, add_count, total_invested, partial_sold,"
+            " trade_mode, stop_loss_price, take_profit_price FROM positions"
         )
         pos_rows = await cursor.fetchall()
         positions = {
@@ -112,6 +117,9 @@ class PortfolioRepository:
                 add_count=int(r[7]),
                 total_invested=Decimal(r[8]),
                 partial_sold=bool(r[9]),
+                trade_mode=str(r[10]),
+                stop_loss_price=Decimal(r[11]) if r[11] is not None else None,
+                take_profit_price=Decimal(r[12]) if r[12] is not None else None,
             )
             for r in pos_rows
         }

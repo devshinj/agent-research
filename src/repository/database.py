@@ -58,16 +58,19 @@ CREATE TABLE IF NOT EXISTS account_state (
 );
 
 CREATE TABLE IF NOT EXISTS positions (
-    market         TEXT PRIMARY KEY,
-    side           TEXT NOT NULL,
-    entry_price    TEXT NOT NULL,
-    quantity       TEXT NOT NULL,
-    entry_time     INTEGER NOT NULL,
-    unrealized_pnl TEXT NOT NULL,
-    highest_price  TEXT NOT NULL,
-    add_count      INTEGER NOT NULL DEFAULT 0,
-    total_invested TEXT NOT NULL DEFAULT '0',
-    partial_sold   INTEGER NOT NULL DEFAULT 0
+    market            TEXT PRIMARY KEY,
+    side              TEXT NOT NULL,
+    entry_price       TEXT NOT NULL,
+    quantity          TEXT NOT NULL,
+    entry_time        INTEGER NOT NULL,
+    unrealized_pnl    TEXT NOT NULL,
+    highest_price     TEXT NOT NULL,
+    add_count         INTEGER NOT NULL DEFAULT 0,
+    total_invested    TEXT NOT NULL DEFAULT '0',
+    partial_sold      INTEGER NOT NULL DEFAULT 0,
+    trade_mode        TEXT NOT NULL DEFAULT 'AUTO',
+    stop_loss_price   TEXT,
+    take_profit_price TEXT
 );
 
 CREATE TABLE IF NOT EXISTS risk_state (

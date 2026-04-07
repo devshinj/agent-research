@@ -46,6 +46,7 @@ interface PositionItem {
   total_invested: string;
   partial_sold: boolean;
   highest_price: string;
+  trade_mode: string;
 }
 
 interface CandleRaw {
@@ -66,6 +67,7 @@ interface HistoryItem {
   quantity: string;
   price: string;
   total_amount: string;
+  reason: string;
 }
 
 interface HistoryResponse {
@@ -110,7 +112,7 @@ const pnlClass = (val: string) => {
 /* ── Component ──────────────────────────────────── */
 
 export default function Dashboard() {
-  const { get } = useApi();
+  const { get, patchJson } = useApi();
   const { lastMessage } = useWebSocket("ws://localhost:8000/ws/live");
 
   // Core state
@@ -299,6 +301,31 @@ export default function Dashboard() {
     setExpandedMarket((prev) => (prev === market ? null : market));
   };
 
+  const [modeModal, setModeModal] = useState<{
+    market: string;
+    currentMode: string;
+    pnl: string;
+  } | null>(null);
+
+  const handleModeToggle = (market: string, currentMode: string) => {
+    const pos = positions.find((p) => p.market === market);
+    setModeModal({
+      market,
+      currentMode,
+      pnl: pos ? Number(pos.pnl_pct).toFixed(2) : "0",
+    });
+  };
+
+  const confirmModeToggle = async () => {
+    if (!modeModal) return;
+    const newMode = modeModal.currentMode === "AUTO" ? "MANUAL" : "AUTO";
+    await patchJson(`/api/exchange/position/${modeModal.market}/mode`, {
+      trade_mode: newMode,
+    });
+    setModeModal(null);
+    refreshAll();
+  };
+
   const totalHistoryPages = history
     ? Math.ceil(history.total / history.size)
     : 1;
@@ -476,6 +503,7 @@ export default function Dashboard() {
                   <th style={{ textAlign: "right" }}>수량</th>
                   <th style={{ textAlign: "right" }}>총 투자금</th>
                   <th style={{ textAlign: "right" }}>평가금액</th>
+                  <th>모드</th>
                   <th style={{ textAlign: "center" }}>상태</th>
                 </tr>
               </thead>
@@ -530,6 +558,18 @@ export default function Dashboard() {
                       <td style={{ textAlign: "right" }}>
                         {formatKRW(pos.eval_amount)}
                       </td>
+                      <td>
+                        <span
+                          className={`badge ${pos.trade_mode === "AUTO" ? "info" : "warn"}`}
+                          style={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleModeToggle(pos.market, pos.trade_mode);
+                          }}
+                        >
+                          {pos.trade_mode}
+                        </span>
+                      </td>
                       <td style={{ textAlign: "center" }}>
                         <div
                           style={{
@@ -561,7 +601,7 @@ export default function Dashboard() {
                     {expandedMarket === pos.market && (
                       <tr>
                         <td
-                          colSpan={9}
+                          colSpan={10}
                           style={{
                             padding: 0,
                             background: "#0b1018",
@@ -586,6 +626,28 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* ── Mode Toggle Modal ──────────────── */}
+      {modeModal && (
+        <div className="modal-overlay" onClick={() => setModeModal(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3>매매 모드 전환</h3>
+            <p>
+              {modeModal.currentMode === "AUTO"
+                ? "이 포지션을 수동 관리로 전환합니다. 자동매매 시그널이 적용되지 않습니다."
+                : `이 포지션을 자동매매에 위임합니다. 현재 손익: ${Number(modeModal.pnl) >= 0 ? "+" : ""}${modeModal.pnl}%. 설정된 예약 손절/익절은 해제됩니다.`}
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setModeModal(null)}>
+                취소
+              </button>
+              <button className="btn btn-primary" onClick={confirmModeToggle}>
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Trade History ────────────────────── */}
       <div className="panel">
@@ -612,6 +674,7 @@ export default function Dashboard() {
                     <th style={{ textAlign: "right" }}>체결 가격</th>
                     <th style={{ textAlign: "right" }}>수량</th>
                     <th style={{ textAlign: "right" }}>거래 금액</th>
+                    <th>사유</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -666,6 +729,16 @@ export default function Dashboard() {
                       </td>
                       <td style={{ textAlign: "right" }}>
                         {formatKRW(item.total_amount)}
+                      </td>
+                      <td>
+                        <span className={`badge ${
+                          item.reason === "ML_SIGNAL" ? "info"
+                          : item.reason === "MANUAL" ? "warn"
+                          : item.reason?.includes("STOP_LOSS") ? "loss"
+                          : "neutral"
+                        }`} style={{ fontSize: "0.7rem" }}>
+                          {item.reason}
+                        </span>
                       </td>
                     </tr>
                   ))}

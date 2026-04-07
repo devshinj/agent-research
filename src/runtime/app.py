@@ -30,6 +30,7 @@ from src.service.risk_manager import RiskManager
 from src.service.screener import Screener
 from src.service.trainer import Trainer
 from src.service.upbit_client import UpbitClient
+from src.service.upbit_ws import UpbitWebSocketService
 from src.types.events import ScreenedCoinsEvent, SignalEvent, TradeEvent
 from src.types.models import Candle, DailySummary, PaperAccount
 
@@ -68,6 +69,7 @@ class App:
 
         # Services
         self.upbit = UpbitClient()
+        self.upbit_ws = UpbitWebSocketService(self.upbit)
         self.collector = Collector(
             self.upbit, self.candle_repo,
             settings.collector.candle_timeframe, settings.collector.max_candles_per_market,
@@ -94,6 +96,7 @@ class App:
         )
         self.screened_markets: list[str] = []
         self.training_in_progress: dict[str, float] = {}  # market -> start epoch
+        self._ws_outbox: list[dict[str, object]] = []
         # Accumulated realized PnL for today's daily summary
         self._today_realized_pnl = Decimal("0")
         self._today_wins = 0
@@ -164,6 +167,12 @@ class App:
             "retrain_models", self._retrain,
             interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
         )
+
+        # Start Upbit WebSocket for live ticker data
+        all_markets = self.collector.markets
+        if all_markets:
+            await self.upbit_ws.start(all_markets)
+            logger.info("Upbit WebSocket started for %d markets", len(all_markets))
 
         logger.info("App started. Seed: %s KRW", self.settings.paper_trading.initial_balance)
 
@@ -246,6 +255,7 @@ class App:
     async def stop(self) -> None:
         await self._save_state()
         await self.scheduler.cancel_all()
+        await self.upbit_ws.stop()
         await self.upbit.close()
         await self.db.close()
         logger.info("App stopped.")
@@ -369,69 +379,6 @@ class App:
         await self.event_bus.publish(ScreenedCoinsEvent(results, 0))
         logger.info("Screened %d coins: %s", len(results), self.screened_markets)
 
-    async def _monitor_positions(self) -> None:
-        """Check open positions for stop-loss / take-profit / trailing-stop exits."""
-        if self.paused or not self.account.positions:
-            return
-
-        markets = list(self.account.positions.keys())
-        tickers = await self.upbit.fetch_tickers(markets)
-        price_map: dict[str, Decimal] = {t["market"]: t["price"] for t in tickers}
-
-        # Always update position prices (even when trading_enabled=False)
-        partial_exits: list[tuple[str, Decimal, Decimal]] = []  # (market, price, fraction)
-        exits: list[tuple[str, Decimal, str]] = []  # (market, price, reason)
-        for market, position in list(self.account.positions.items()):
-            price = price_map.get(market)
-            if price is None:
-                continue
-            self.portfolio_manager.update_position(position, price)
-            if self.trading_enabled:
-                # 1. 손절 체크 (최우선)
-                pnl_pct = (price - position.entry_price) / position.entry_price
-                if pnl_pct <= -self.settings.risk.stop_loss_pct:
-                    exits.append((market, price, "STOP_LOSS"))
-                    continue
-                # 2. 부분 익절 체크
-                fraction = self.portfolio_manager.check_partial_exit(position, price)
-                if fraction is not None:
-                    partial_exits.append((market, price, fraction))
-                    continue
-                # 3. 전체 매도 조건 (트레일링, 전체 익절)
-                reason = self.portfolio_manager.check_exit_conditions(position, price)
-                if reason is not None:
-                    exits.append((market, price, reason))
-
-        # Execute partial exits
-        for market, price, fraction in partial_exits:
-            if market not in self.account.positions:
-                continue
-            position = self.account.positions[market]
-            entry_price = position.entry_price
-            order = self.paper_engine.execute_partial_sell(
-                self.account, market, price, fraction,
-            )
-            await self.order_repo.save(order)
-            self.risk_manager.record_trade()
-            assert order.fill_price is not None  # always set for FILLED orders
-            self._record_trade_result(entry_price, order.fill_price, order.quantity)
-            await self.event_bus.publish(TradeEvent(order, order.created_at))
-            logger.info("Partial exit %s: %s @ %s (%.0f%%)", market, market, price, fraction * 100)
-
-        # Execute full exits
-        for market, price, reason in exits:
-            if market not in self.account.positions:
-                continue
-            position = self.account.positions[market]
-            entry_price = position.entry_price
-            quantity = position.quantity
-            order = self.paper_engine.execute_sell(self.account, market, price, reason)
-            await self.order_repo.save(order)
-            self.risk_manager.record_trade()
-            self._record_trade_result(entry_price, order.fill_price, quantity)
-            await self.event_bus.publish(TradeEvent(order, order.created_at))
-            logger.info("Auto-exit %s: %s @ %s", reason, market, price)
-
     async def _collect_and_predict(self) -> None:
         if not self.screened_markets:
             return
@@ -465,22 +412,6 @@ class App:
                     ))
                 except KeyError:
                     pass  # model not loaded
-
-    def _record_trade_result(
-        self, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
-    ) -> None:
-        """Record win or loss for circuit breaker, daily loss, and realized PnL."""
-        realized = (fill_price - entry_price) * quantity
-        self._today_realized_pnl += realized
-
-        if fill_price >= entry_price:
-            self.risk_manager.record_win()
-            self._today_wins += 1
-        else:
-            self.risk_manager.record_loss()
-            self._today_losses += 1
-            loss_pct = (entry_price - fill_price) / entry_price
-            self.risk_manager.record_daily_loss(loss_pct)
 
     async def _on_signal(self, event: SignalEvent) -> None:
         if self.paused or not self.trading_enabled:
@@ -546,6 +477,12 @@ class App:
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
         elif event.signal_type == SignalType.SELL:
+            position = self.account.positions.get(event.market)
+            if position is None:
+                return
+            if position.trade_mode == "MANUAL":
+                logger.info("Skipping ML SELL for MANUAL position %s", event.market)
+                return
             tickers = await self.upbit.fetch_tickers([event.market])
             if not tickers:
                 return
@@ -567,6 +504,104 @@ class App:
             event.order.side.value, event.order.market, event.order.fill_price,
         )
         await self._save_state()
+
+    async def _monitor_positions(self) -> None:
+        """Check all open positions for exit conditions."""
+        if not self.account.positions:
+            return
+
+        markets = list(self.account.positions.keys())
+        tickers = await self.upbit.fetch_tickers(markets)
+        price_map: dict[str, Decimal] = {t["market"]: t["price"] for t in tickers}
+
+        exits: list[tuple[str, Decimal, str]] = []
+        partial_exits: list[tuple[str, Decimal, Decimal]] = []
+
+        for market, position in self.account.positions.items():
+            price = price_map.get(market)
+            if price is None:
+                continue
+
+            self.portfolio_manager.update_position(position, price)
+
+            if self.trading_enabled:
+                # MANUAL 포지션: 예약 손절/익절만 체크
+                if position.trade_mode == "MANUAL":
+                    manual_reason = self.portfolio_manager.check_manual_exit(position, price)
+                    if manual_reason is not None:
+                        exits.append((market, price, manual_reason))
+                    continue
+
+                # AUTO 포지션: 기존 로직
+                # 1. 손절 체크 (최우선)
+                pnl_pct = (price - position.entry_price) / position.entry_price
+                if pnl_pct <= -self.settings.risk.stop_loss_pct:
+                    exits.append((market, price, "STOP_LOSS"))
+                    continue
+                # 2. 부분 익절 체크
+                fraction = self.portfolio_manager.check_partial_exit(position, price)
+                if fraction is not None:
+                    partial_exits.append((market, price, fraction))
+                    continue
+                # 3. 전체 매도 조건 (트레일링, 전체 익절)
+                reason = self.portfolio_manager.check_exit_conditions(position, price)
+                if reason is not None:
+                    exits.append((market, price, reason))
+
+        for market, price, reason in exits:
+            position = self.account.positions[market]
+            entry_price = position.entry_price
+            quantity = position.quantity
+            order = self.paper_engine.execute_sell(self.account, market, price, reason)
+            await self.order_repo.save(order)
+            self.risk_manager.record_trade()
+            self._record_trade_result(entry_price, price, quantity)
+            await self.event_bus.publish(TradeEvent(order, order.created_at))
+            self._ws_outbox.append({
+                "type": "order_filled",
+                "data": {
+                    "market": order.market,
+                    "side": order.side.value,
+                    "reason": order.reason,
+                    "price": str(order.fill_price),
+                },
+            })
+
+        for market, price, fraction in partial_exits:
+            position = self.account.positions[market]
+            entry_price = position.entry_price
+            sell_quantity = position.quantity * fraction
+            order = self.paper_engine.execute_partial_sell(
+                self.account, market, price, fraction,
+            )
+            await self.order_repo.save(order)
+            self._record_trade_result(entry_price, price, sell_quantity)
+            await self.event_bus.publish(TradeEvent(order, order.created_at))
+            self._ws_outbox.append({
+                "type": "order_filled",
+                "data": {
+                    "market": order.market,
+                    "side": order.side.value,
+                    "reason": order.reason,
+                    "price": str(order.fill_price),
+                },
+            })
+
+    def _record_trade_result(
+        self, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
+    ) -> None:
+        """Record win or loss for circuit breaker, daily loss, and realized PnL."""
+        realized = (fill_price - entry_price) * quantity
+        self._today_realized_pnl += realized
+
+        if fill_price >= entry_price:
+            self.risk_manager.record_win()
+            self._today_wins += 1
+        else:
+            self.risk_manager.record_loss()
+            self._today_losses += 1
+            loss_pct = (entry_price - fill_price) / entry_price
+            self.risk_manager.record_daily_loss(loss_pct)
 
     async def _save_state(self) -> None:
         await self.portfolio_repo.save_account(self.account)

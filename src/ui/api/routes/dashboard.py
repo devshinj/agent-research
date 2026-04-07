@@ -18,13 +18,21 @@ async def get_markets(request: Request) -> list[dict[str, str]]:
 
 
 @router.get("/candles")
-async def get_candles(request: Request, market: str, limit: int = 200) -> list[dict]:
+async def get_candles(
+    request: Request, market: str, limit: int = 200, timeframe: str | None = None,
+) -> list[dict]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
 
-    timeframe = f"{app.settings.collector.candle_timeframe}m"
-    candles = await app.candle_repo.get_latest(market, timeframe, limit=limit)
+    # For timeframes we don't cache, fetch directly from Upbit
+    if timeframe == "1D":
+        candles = await app.upbit.fetch_daily_candles(market, count=limit)
+    elif timeframe is not None and int(timeframe) != app.settings.collector.candle_timeframe:
+        candles = await app.upbit.fetch_candles(market, timeframe=int(timeframe), count=limit)
+    else:
+        tf_str = f"{app.settings.collector.candle_timeframe}m"
+        candles = await app.candle_repo.get_latest(market, tf_str, limit=limit)
 
     return [
         {

@@ -28,6 +28,9 @@ class Position:
     add_count: int = 0
     total_invested: Decimal = field(default_factory=lambda: Decimal("0"))
     partial_sold: bool = False
+    trade_mode: str = "AUTO"
+    stop_loss_price: Decimal | None = None
+    take_profit_price: Decimal | None = None
 
 
 @dataclass

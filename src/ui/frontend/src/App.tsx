@@ -1,14 +1,31 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Dashboard from "./pages/Dashboard";
+import Exchange from "./pages/Exchange";
 import Strategy from "./pages/Strategy";
 import Risk from "./pages/Risk";
 import System from "./pages/System";
 
 function App() {
-  const { isConnected } = useWebSocket("ws://localhost:8000/ws/live");
+  const { lastMessage, isConnected } = useWebSocket("ws://localhost:8000/ws/live");
   const [tradingEnabled, setTradingEnabled] = useState(false);
+  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
+  const toastId = useRef(0);
+
+  useEffect(() => {
+    if (lastMessage?.type !== "order_filled") return;
+    const d = lastMessage.data as { market: string; side: string; reason: string; price: string };
+    const id = ++toastId.current;
+    const msg =
+      d.side === "SELL"
+        ? `${d.market.replace("KRW-", "")} ${d.reason} — ₩${Number(d.price).toLocaleString("ko-KR")}에 매도 완료`
+        : `${d.market.replace("KRW-", "")} 매수 완료 — ₩${Number(d.price).toLocaleString("ko-KR")}`;
+    setToasts((prev) => [...prev, { id, msg }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }, [lastMessage]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -54,6 +71,11 @@ function App() {
               </NavLink>
             </li>
             <li>
+              <NavLink to="/exchange" className={({ isActive }) => (isActive ? "active" : "")}>
+                <span className="nav-icon">◇</span> 거래소
+              </NavLink>
+            </li>
+            <li>
               <NavLink to="/strategy">
                 <span className="nav-icon">&#9650;</span>
                 전략
@@ -94,11 +116,19 @@ function App() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/exchange" element={<Exchange />} />
             <Route path="/strategy" element={<Strategy />} />
             <Route path="/risk" element={<Risk />} />
             <Route path="/system" element={<System />} />
           </Routes>
         </main>
+
+        {/* ── Toast notifications ──────────── */}
+        <div className="toast-container">
+          {toasts.map((t) => (
+            <div key={t.id} className="toast">{t.msg}</div>
+          ))}
+        </div>
       </div>
     </BrowserRouter>
   );

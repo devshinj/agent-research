@@ -13,8 +13,8 @@ risk:
   take_profit_pct: 0.08
   trailing_stop_pct: 0.015
   max_daily_loss_pct: 0.05
-  max_daily_trades: 500
-  consecutive_loss_limit: 20
+  max_daily_trades: 50
+  consecutive_loss_limit: 5
   cooldown_minutes: 60
   partial_take_profit_pct: 0.04
   partial_sell_fraction: 0.5
