@@ -25,6 +25,9 @@ class Position:
     entry_time: int
     unrealized_pnl: Decimal
     highest_price: Decimal
+    trade_mode: str = "AUTO"
+    stop_loss_price: Decimal | None = None
+    take_profit_price: Decimal | None = None
 
 
 @dataclass
