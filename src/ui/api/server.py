@@ -6,7 +6,7 @@ import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.ui.api.routes import control, dashboard, portfolio, risk, strategy
+from src.ui.api.routes import control, dashboard, exchange, portfolio, risk, strategy
 
 
 def create_app() -> FastAPI:
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(strategy.router, prefix="/api/strategy", tags=["strategy"])
     app.include_router(risk.router, prefix="/api/risk", tags=["risk"])
     app.include_router(control.router, prefix="/api/control", tags=["control"])
+    app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
