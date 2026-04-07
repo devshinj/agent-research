@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -48,7 +48,7 @@ async def get_signals(
             "signal_type": r["signal_type"],
             "confidence": r["confidence"],
             "created_at": datetime.fromtimestamp(
-                r["timestamp"], tz=UTC,
+                r["timestamp"], tz=timezone(timedelta(hours=9)),
             ).strftime("%Y-%m-%d %H:%M:%S"),
             "basis": json.loads(r["basis"]) if r.get("basis") else None,
         }

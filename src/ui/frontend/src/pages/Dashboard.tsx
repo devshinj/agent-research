@@ -261,7 +261,7 @@ export default function Dashboard() {
       `/api/dashboard/candles?market=${expandedMarket}&limit=100`
     ).then((candles) => {
       const candleData: CandlestickData[] = candles.map((c) => ({
-        time: (Number(c.timestamp) / 1000) as unknown as CandlestickData["time"],
+        time: (Number(c.timestamp) / 1000 + 32400) as unknown as CandlestickData["time"],
         open: Number(c.open),
         high: Number(c.high),
         low: Number(c.low),
@@ -269,7 +269,7 @@ export default function Dashboard() {
       }));
 
       const volumeData: HistogramData[] = candles.map((c) => ({
-        time: (Number(c.timestamp) / 1000) as unknown as HistogramData["time"],
+        time: (Number(c.timestamp) / 1000 + 32400) as unknown as HistogramData["time"],
         value: Number(c.volume),
         color:
           Number(c.close) >= Number(c.open)
@@ -687,7 +687,7 @@ export default function Dashboard() {
                           color: "var(--text-muted)",
                         }}
                       >
-                        {new Date(item.filled_at).toLocaleString("ko-KR", {
+                        {new Date(Number(item.filled_at) * 1000).toLocaleString("ko-KR", {
                           month: "2-digit",
                           day: "2-digit",
                           hour: "2-digit",
@@ -712,10 +712,10 @@ export default function Dashboard() {
                       </td>
                       <td style={{ textAlign: "center" }}>
                         <span
-                          className={`badge ${item.side === "bid" ? "profit" : "loss"}`}
+                          className={`badge ${item.side === "BUY" ? "profit" : "loss"}`}
                           style={{ fontSize: 10, padding: "2px 8px" }}
                         >
-                          {item.side === "bid" ? "매수" : "매도"}
+                          {item.side === "BUY" ? "매수" : "매도"}
                         </span>
                       </td>
                       <td style={{ textAlign: "right" }}>

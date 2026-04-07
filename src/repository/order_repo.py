@@ -49,6 +49,13 @@ class OrderRepository:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
+    async def delete_older_than(self, timestamp: int) -> int:
+        cursor = await self._db.conn.execute(
+            "DELETE FROM orders WHERE created_at < ?", (timestamp,)
+        )
+        await self._db.conn.commit()
+        return cursor.rowcount
+
     @staticmethod
     def _row_to_order(row: tuple) -> Order:  # type: ignore[type-arg]
         return Order(

@@ -69,8 +69,9 @@ async def manual_buy(request: Request, body: BuyRequest) -> dict:
     if existing is None and len(app.account.positions) >= app.settings.paper_trading.max_open_positions:
         return {"success": False, "error": "포지션 한도 도달"}
 
-    if amount > app.account.cash_balance:
-        return {"success": False, "error": "잔고 부족"}
+    safe_max = app.paper_engine.safe_buy_amount(app.account.cash_balance)
+    if amount > safe_max:
+        return {"success": False, "error": f"잔고 부족 (수수료 포함 최대 {safe_max:,.0f}원)"}
 
     price = app.upbit_ws.get_price(body.market)
     if price is None:
@@ -207,6 +208,15 @@ async def update_exit_orders(request: Request, market: str, body: ExitOrdersRequ
     position.take_profit_price = Decimal(body.take_profit_price) if body.take_profit_price else None
     await app._save_state()
     return {"success": True, "position": _serialize_position(position)}
+
+
+@router.get("/max-buy-amount")
+async def max_buy_amount(request: Request) -> dict:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"amount": "0"}
+    safe = app.paper_engine.safe_buy_amount(app.account.cash_balance)
+    return {"amount": str(safe)}
 
 
 def _serialize_position(pos) -> dict:  # type: ignore[type-arg]

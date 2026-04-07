@@ -49,6 +49,13 @@ class SignalRepository:
             for r in rows
         ]
 
+    async def delete_older_than(self, timestamp: int) -> int:
+        cursor = await self._db.conn.execute(
+            "DELETE FROM signals WHERE timestamp < ?", (timestamp,)
+        )
+        await self._db.conn.commit()
+        return cursor.rowcount
+
     async def get_stats_by_market(self, market: str) -> dict[str, object]:
         cursor = await self._db.conn.execute(
             "SELECT "

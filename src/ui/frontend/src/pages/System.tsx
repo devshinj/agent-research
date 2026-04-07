@@ -98,50 +98,67 @@ export default function System() {
         <div className="page-sub">매매 엔진 제어 및 시스템 정보</div>
       </div>
 
-      {/* ── Engine Control ─────────────── */}
+      {/* ── Engine Status ─────────────── */}
       <div className="panel">
         <div className="panel-header">
-          <h3>매매 엔진</h3>
-          <div style={{ display: "flex", gap: 8 }}>
-            <span className={`badge ${status === "running" ? "profit" : "warn"}`}>
-              {status === "running" ? "실행 중" : status === "paused" ? "일시정지" : "알 수 없음"}
-            </span>
-            <span className={`badge ${tradingEnabled ? "profit" : "neutral"}`}>
-              {tradingEnabled ? "매매 활성" : "매매 비활성"}
-            </span>
-          </div>
+          <h3>엔진 상태</h3>
+          <span className={`badge ${status === "running" ? "profit" : "warn"}`}>
+            {status === "running" ? "가동 중" : status === "paused" ? "일시정지" : "알 수 없음"}
+          </span>
         </div>
         <div className="panel-body">
-          <div style={{ display: "flex", gap: 12, padding: "12px 0" }}>
+          <p style={{ color: "var(--text-dim)", lineHeight: 1.6, margin: "0 0 12px", fontSize: 13 }}>
+            엔진을 일시정지하면 데이터 수집, ML 신호 생성, 포지션 모니터링이 모두 중단됩니다.
+            수동 매매는 영향받지 않습니다.
+          </p>
+          <div style={{ display: "flex", gap: 12 }}>
             {status === "running" ? (
-              <button className="btn btn-danger" onClick={handlePause} disabled={loading}>
-                일시정지
+              <button className="btn btn-ghost" onClick={handlePause} disabled={loading}>
+                엔진 일시정지
               </button>
             ) : (
               <button className="btn btn-primary" onClick={handleResume} disabled={loading}>
-                재개
+                엔진 재개
               </button>
             )}
-            <button
-              className={`btn ${tradingEnabled ? "btn-danger" : "btn-primary"}`}
-              onClick={handleTradingToggle}
-              disabled={loading}
-            >
-              {tradingEnabled ? "매매 중지" : "매매 시작"}
-            </button>
           </div>
+        </div>
+      </div>
+
+      {/* ── Auto Trading ────────────────── */}
+      <div className="panel">
+        <div className="panel-header">
+          <h3>자동매매</h3>
+          <span className={`badge ${tradingEnabled ? "profit" : "neutral"}`}>
+            {tradingEnabled ? "ON" : "OFF"}
+          </span>
+        </div>
+        <div className="panel-body">
+          <p style={{ color: "var(--text-dim)", lineHeight: 1.6, margin: "0 0 12px", fontSize: 13 }}>
+            {tradingEnabled
+              ? "ML 신호에 따라 자동으로 매수/매도를 실행합니다. 중지해도 데이터 수집과 신호 생성은 계속됩니다."
+              : "자동매매가 꺼져 있습니다. ML 신호는 생성되지만 주문이 실행되지 않습니다. 수동 매매는 가능합니다."}
+          </p>
+          <button
+            className={`btn ${tradingEnabled ? "btn-danger" : "btn-primary"}`}
+            onClick={handleTradingToggle}
+            disabled={loading}
+          >
+            {tradingEnabled ? "자동매매 중지" : "자동매매 시작"}
+          </button>
         </div>
       </div>
 
       {/* ── Reset ──────────────────────── */}
       <div className="panel">
         <div className="panel-header">
-          <h3>전체 초기화</h3>
+          <h3>계좌 초기화</h3>
           <span className="badge loss">위험</span>
         </div>
         <div className="panel-body">
-          <p style={{ color: "var(--text-dim)", lineHeight: 1.6, margin: "0 0 16px" }}>
-            잔고와 거래내역이 모두 초기화됩니다. 학습 데이터와 모델은 유지됩니다.
+          <p style={{ color: "var(--text-dim)", lineHeight: 1.6, margin: "0 0 16px", fontSize: 13 }}>
+            잔고와 거래내역이 모두 초기화됩니다. 보유 포지션이 전부 삭제됩니다.
+            학습된 모델과 캔들 데이터는 유지됩니다.
           </p>
           <button className="btn btn-danger" onClick={() => setShowReset(true)} disabled={loading}>
             초기화 실행

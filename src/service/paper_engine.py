@@ -43,6 +43,11 @@ class PaperEngine:
     def update_config(self, config: PaperTradingConfig) -> None:
         self._config = config
 
+    def safe_buy_amount(self, cash_balance: Decimal) -> Decimal:
+        """Return the maximum invest_amount that won't exceed cash after fees + slippage."""
+        overhead = (_ONE + self._config.slippage_rate) * (_ONE + self._config.fee_rate)
+        return (cash_balance / overhead).to_integral_value(rounding=ROUND_DOWN)
+
     def execute_buy(
         self,
         account: PaperAccount,

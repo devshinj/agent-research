@@ -105,12 +105,49 @@ class Database:
         await self._conn.executescript(SCHEMA_SQL)
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA busy_timeout=5000")
+        await self._migrate()
+
+    async def _migrate(self) -> None:
+        """Add missing columns to existing tables."""
+        assert self._conn is not None
+
+        # positions table migrations
+        cursor = await self._conn.execute("PRAGMA table_info(positions)")
+        pos_cols = {row[1] for row in await cursor.fetchall()}
+        pos_migrations = [
+            ("add_count", "ALTER TABLE positions ADD COLUMN add_count INTEGER NOT NULL DEFAULT 0"),
+            ("total_invested", "ALTER TABLE positions ADD COLUMN total_invested TEXT NOT NULL DEFAULT '0'"),
+            ("partial_sold", "ALTER TABLE positions ADD COLUMN partial_sold INTEGER NOT NULL DEFAULT 0"),
+            ("trade_mode", "ALTER TABLE positions ADD COLUMN trade_mode TEXT NOT NULL DEFAULT 'AUTO'"),
+            ("stop_loss_price", "ALTER TABLE positions ADD COLUMN stop_loss_price TEXT"),
+            ("take_profit_price", "ALTER TABLE positions ADD COLUMN take_profit_price TEXT"),
+        ]
+        for col_name, sql in pos_migrations:
+            if col_name not in pos_cols:
+                await self._conn.execute(sql)
+
+        # signals table migrations
+        cursor = await self._conn.execute("PRAGMA table_info(signals)")
+        sig_cols = {row[1] for row in await cursor.fetchall()}
+        sig_migrations = [
+            ("basis", "ALTER TABLE signals ADD COLUMN basis TEXT"),
+        ]
+        for col_name, sql in sig_migrations:
+            if col_name not in sig_cols:
+                await self._conn.execute(sql)
 
     @property
     def conn(self) -> aiosqlite.Connection:
         if self._conn is None:
             raise RuntimeError("Database not initialized. Call initialize() first.")
         return self._conn
+
+    async def delete_screening_log_older_than(self, timestamp: int) -> int:
+        cursor = await self.conn.execute(
+            "DELETE FROM screening_log WHERE timestamp < ?", (timestamp,)
+        )
+        await self.conn.commit()
+        return cursor.rowcount
 
     async def reset_trading_data(self) -> None:
         """Delete all trading data. Preserves candles and screening_log."""

@@ -49,13 +49,39 @@ class UpbitClient:
         self, market: str, timeframe: int = 1, count: int = 200
     ) -> list[Candle]:
         client = await self._get_http()
-        async with self._semaphore:
-            resp = await client.get(
-                f"/candles/minutes/{timeframe}",
-                params={"market": market, "count": count},
-            )
-            resp.raise_for_status()
-        return [self.parse_candle(raw, f"{timeframe}m") for raw in resp.json()]
+        tf_str = f"{timeframe}m"
+        if count <= 200:
+            async with self._semaphore:
+                resp = await client.get(
+                    f"/candles/minutes/{timeframe}",
+                    params={"market": market, "count": count},
+                )
+                resp.raise_for_status()
+            return [self.parse_candle(raw, tf_str) for raw in resp.json()]
+
+        # Paginate for count > 200
+        all_candles: list[Candle] = []
+        remaining = count
+        to: str | None = None
+        while remaining > 0:
+            batch = min(remaining, 200)
+            params: dict[str, str | int] = {"market": market, "count": batch}
+            if to is not None:
+                params["to"] = to
+            async with self._semaphore:
+                resp = await client.get(
+                    f"/candles/minutes/{timeframe}", params=params,
+                )
+                resp.raise_for_status()
+            rows = resp.json()
+            if not rows:
+                break
+            all_candles.extend(self.parse_candle(raw, tf_str) for raw in rows)
+            remaining -= len(rows)
+            # Upbit returns newest first; last item is oldest — use its time as 'to'
+            to = rows[-1]["candle_date_time_utc"] + "Z"
+            await asyncio.sleep(0.11)  # rate limit
+        return all_candles
 
     async def fetch_daily_candles(
         self, market: str, count: int = 200

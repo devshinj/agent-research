@@ -49,7 +49,10 @@ class App:
             "min_volume_krw", "min_volatility_pct", "max_volatility_pct",
             "max_coins", "always_include",
         },
-        "paper_trading": {"max_position_pct", "max_open_positions"},
+        "paper_trading": {
+            "max_position_pct", "max_open_positions",
+            "max_additional_buys", "additional_buy_drop_pct", "additional_buy_ratio",
+        },
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -139,11 +142,17 @@ class App:
         loaded = await self._load_existing_models()
         logger.info("Loaded %d existing models", loaded)
 
+        # Cleanup stale data on startup
+        await self._cleanup_stale_data()
+
         # Initial data
         await self.collector.refresh_markets()
 
-        # Initial screening + model training
+        # Initial screening + seed candles + model training
         await self._refresh_screening()
+        if self.screened_markets:
+            logger.info("Seeding candle history for %d screened markets...", len(self.screened_markets))
+            await self.collector.collect_candles(self.screened_markets)
         await self._train_missing_models()
 
         # Schedule periodic tasks
@@ -167,6 +176,10 @@ class App:
             "retrain_models", self._retrain,
             interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
         )
+        self.scheduler.schedule_interval(
+            "cleanup_stale_data", self._cleanup_stale_data,
+            interval_seconds=6 * 3600,  # every 6 hours
+        )
 
         # Start Upbit WebSocket for live ticker data
         all_markets = self.collector.markets
@@ -174,7 +187,11 @@ class App:
             await self.upbit_ws.start(all_markets)
             logger.info("Upbit WebSocket started for %d markets", len(all_markets))
 
-        logger.info("App started. Seed: %s KRW", self.settings.paper_trading.initial_balance)
+        self.paused = False
+        logger.info(
+            "App started. Seed: %s KRW | Auto-trading: OFF (enable from System page)",
+            self.settings.paper_trading.initial_balance,
+        )
 
     async def _load_existing_models(self) -> int:
         """Load all .pkl models from data/models/ into predictor."""
@@ -372,6 +389,46 @@ class App:
 
         return updated
 
+    async def _cleanup_stale_data(self) -> None:
+        """Delete stale candles, orders, signals, screening logs, and old model files."""
+        now = int(time.time())
+        day_seconds = 86400
+
+        candle_cutoff = now - self.settings.data.stale_candle_days * day_seconds
+        order_cutoff = now - self.settings.data.stale_order_days * day_seconds
+        signal_cutoff = now - self.settings.data.stale_candle_days * day_seconds
+        screening_cutoff = now - self.settings.data.stale_candle_days * day_seconds
+
+        async with self._db_lock:
+            candles_deleted = await self.candle_repo.delete_older_than(candle_cutoff)
+            orders_deleted = await self.order_repo.delete_older_than(order_cutoff)
+            signals_deleted = await self.signal_repo.delete_older_than(signal_cutoff)
+            screening_deleted = await self.db.delete_screening_log_older_than(screening_cutoff)
+
+        total = candles_deleted + orders_deleted + signals_deleted + screening_deleted
+        if total > 0:
+            logger.info(
+                "Stale data cleanup: candles=%d, orders=%d, signals=%d, screening=%d",
+                candles_deleted, orders_deleted, signals_deleted, screening_deleted,
+            )
+
+        # Clean up old model files (keep only the latest per market)
+        model_dir = Path(self.settings.data.model_dir)
+        model_cutoff = now - self.settings.data.stale_model_days * day_seconds
+        models_removed = 0
+        if model_dir.exists():
+            for market_dir in model_dir.iterdir():
+                if not market_dir.is_dir():
+                    continue
+                model_files = sorted(market_dir.glob("model_*.pkl"), reverse=True)
+                # Keep the latest, remove old ones past stale_model_days
+                for pkl in model_files[1:]:
+                    if pkl.stat().st_mtime < model_cutoff:
+                        pkl.unlink()
+                        models_removed += 1
+        if models_removed > 0:
+            logger.info("Stale model cleanup: %d old model files removed", models_removed)
+
     async def _refresh_screening(self) -> None:
         tickers = await self.upbit.fetch_tickers(self.collector.markets)
         results = self.screener.screen(tickers, self.collector.korean_names)
@@ -415,6 +472,7 @@ class App:
 
     async def _on_signal(self, event: SignalEvent) -> None:
         if self.paused or not self.trading_enabled:
+            logger.debug("Signal ignored (%s %s) — trading disabled", event.signal_type.name, event.market)
             return
 
         from src.types.enums import SignalType

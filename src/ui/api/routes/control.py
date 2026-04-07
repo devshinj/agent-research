@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, HTTPException, Request
 
 from src.config.settings import Settings
@@ -68,15 +69,10 @@ async def get_config(request: Request) -> dict[str, Any]:
 @router.post("/reset")
 async def reset(request: Request) -> dict[str, str]:
     app = getattr(request.app.state, "app", None)
-    body = await request.json()
-    new_settings = Settings.from_dict(body)
 
-    # Write to YAML
-    new_settings.to_yaml(_CONFIG_PATH)
-
-    # Reset app state
+    # Reset app state using current settings (don't overwrite YAML)
     if app is not None:
-        await app.reset(new_settings)
+        await app.reset(app.settings)
 
     return {"status": "running"}
 
@@ -94,8 +90,8 @@ async def patch_config(request: Request) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
-    # Persist to YAML
-    app.settings.to_yaml(_CONFIG_PATH)
+    # Persist only changed fields to YAML (merge, not overwrite)
+    _merge_yaml(_CONFIG_PATH, body)
 
     result: dict[str, Any] = {
         "status": "updated",
@@ -103,3 +99,21 @@ async def patch_config(request: Request) -> dict[str, Any]:
         "config": app.settings.to_dict(),
     }
     return result
+
+
+def _merge_yaml(path: Path, patch: dict[str, Any]) -> None:
+    """Read existing YAML, merge patch into it, write back."""
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    else:
+        data = {}
+
+    for section, values in patch.items():
+        if isinstance(values, dict) and isinstance(data.get(section), dict):
+            data[section].update(values)
+        else:
+            data[section] = values
+
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)

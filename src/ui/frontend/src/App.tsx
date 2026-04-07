@@ -43,15 +43,7 @@ function App() {
     return () => clearInterval(id);
   }, [fetchStatus]);
 
-  const toggleTrading = async () => {
-    const endpoint = tradingEnabled ? "/api/control/trading/stop" : "/api/control/trading/start";
-    try {
-      const res = await fetch(endpoint, { method: "POST" });
-      if (res.ok) {
-        setTradingEnabled(!tradingEnabled);
-      }
-    } catch { /* ignore */ }
-  };
+
 
   return (
     <BrowserRouter>
@@ -96,12 +88,10 @@ function App() {
           </ul>
 
           <div className="sidebar-trading">
-            <button
-              className={`trading-toggle ${tradingEnabled ? "active" : ""}`}
-              onClick={toggleTrading}
-            >
-              {tradingEnabled ? "매매 중지" : "매매 시작"}
-            </button>
+            <div className={`trading-indicator ${tradingEnabled ? "on" : "off"}`}>
+              <span className={`status-dot ${tradingEnabled ? "live" : "offline"}`} />
+              <span>{tradingEnabled ? "자동매매 ON" : "자동매매 OFF"}</span>
+            </div>
           </div>
 
           <div className="sidebar-status">
