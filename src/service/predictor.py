@@ -7,15 +7,18 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 
 from src.service.features import FeatureBuilder
 from src.types.enums import SignalType
-from src.types.models import Signal
+from src.types.models import Signal, SignalBasis
 
 logger = logging.getLogger(__name__)
 
 LABEL_TO_SIGNAL = {0: SignalType.SELL, 1: SignalType.HOLD, 2: SignalType.BUY}
+
+_EMPTY_BASIS = SignalBasis(top_features=())
 
 
 class Predictor:
@@ -40,7 +43,7 @@ class Predictor:
     def get_model_meta(self, market: str) -> dict[str, Any]:
         return self._model_meta.get(market, {})
 
-    def predict(self, market: str, candle_df: pd.DataFrame) -> Signal:
+    def predict(self, market: str, candle_df: pd.DataFrame) -> tuple[Signal, SignalBasis]:
         if market not in self._models:
             raise KeyError(f"No model loaded for {market}")
 
@@ -48,18 +51,51 @@ class Predictor:
         features = self._fb.build(candle_df)
 
         if features.empty:
-            return Signal(market, SignalType.HOLD, 0.0, int(time.time()))
+            return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
         latest = features.dropna().iloc[-1:]
         if latest.empty:
-            return Signal(market, SignalType.HOLD, 0.0, int(time.time()))
+            return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
         proba = model.predict_proba(latest)[0]  # type: ignore[union-attr]
         pred_class = int(proba.argmax())
         confidence = float(proba.max())
 
         if confidence < self._min_confidence:
-            return Signal(market, SignalType.HOLD, confidence, int(time.time()))
+            return Signal(market, SignalType.HOLD, confidence, int(time.time())), _EMPTY_BASIS
 
         signal_type = LABEL_TO_SIGNAL[pred_class]
-        return Signal(market, signal_type, confidence, int(time.time()))
+        basis = self._compute_basis(model, latest, pred_class, features.columns.tolist())
+
+        return Signal(market, signal_type, confidence, int(time.time())), basis
+
+    def _compute_basis(
+        self,
+        model: object,
+        latest: pd.DataFrame,
+        pred_class: int,
+        feature_names: list[str],
+    ) -> SignalBasis:
+        n_features = len(feature_names)
+        contrib_raw = model.predict(latest, pred_contrib=True)  # type: ignore[union-attr]
+        contrib = np.array(contrib_raw).reshape(1, -1)
+        # LightGBM multiclass: flat (1, (n_features+1)*n_classes)
+        # reshape to (n_classes, n_features+1)
+        n_classes = contrib.shape[1] // (n_features + 1)
+        reshaped = contrib[0].reshape(n_classes, n_features + 1)
+        # Get contributions for predicted class, exclude bias (last element)
+        class_contrib = reshaped[pred_class, :n_features]
+
+        # Top 5 by absolute value
+        top_indices = np.argsort(np.abs(class_contrib))[::-1][:5]
+        feature_values = latest.iloc[0]
+
+        top_features = tuple(
+            (
+                feature_names[i],
+                float(class_contrib[i]),
+                float(feature_values.iloc[i]),
+            )
+            for i in top_indices
+        )
+        return SignalBasis(top_features=top_features)
