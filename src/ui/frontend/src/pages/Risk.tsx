@@ -11,14 +11,22 @@ interface RiskStatus {
 
 interface ConfigValues {
   risk: {
+    stop_loss_pct: number;
+    take_profit_pct: number;
+    trailing_stop_pct: number;
     max_daily_loss_pct: number;
     max_daily_trades: number;
     consecutive_loss_limit: number;
     cooldown_minutes: number;
+    partial_take_profit_pct: number;
+    partial_sell_fraction: number;
   };
   paper_trading: {
     max_position_pct: number;
     max_open_positions: number;
+    max_additional_buys: number;
+    additional_buy_drop_pct: number;
+    additional_buy_ratio: number;
   };
 }
 
@@ -33,31 +41,19 @@ interface SliderDef {
 }
 
 const SLIDERS: SliderDef[] = [
-  {
-    section: "risk", key: "max_daily_trades", label: "일일 최대 거래",
-    min: 10, max: 500, step: 10,
-    format: (v) => `${v}회`,
-  },
-  {
-    section: "risk", key: "consecutive_loss_limit", label: "연속 손실 한도",
-    min: 3, max: 20, step: 1,
-    format: (v) => `${v}회`,
-  },
-  {
-    section: "risk", key: "cooldown_minutes", label: "쿨다운 시간",
-    min: 5, max: 120, step: 5,
-    format: (v) => `${v}분`,
-  },
-  {
-    section: "paper_trading", key: "max_position_pct", label: "포지션 최대 비중",
-    min: 0.1, max: 1.0, step: 0.05,
-    format: (v) => `${(v * 100).toFixed(0)}%`,
-  },
-  {
-    section: "paper_trading", key: "max_open_positions", label: "동시 포지션 수",
-    min: 1, max: 10, step: 1,
-    format: (v) => `${v}개`,
-  },
+  { section: "risk", key: "stop_loss_pct", label: "손절 기준", min: 0.005, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "risk", key: "take_profit_pct", label: "전량 익절 기준", min: 0.02, max: 0.2, step: 0.01, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "risk", key: "trailing_stop_pct", label: "트레일링 스톱", min: 0.005, max: 0.05, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "risk", key: "partial_take_profit_pct", label: "부분 익절 기준", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "risk", key: "partial_sell_fraction", label: "부분 매도 비율", min: 0.1, max: 0.9, step: 0.1, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "risk", key: "max_daily_trades", label: "일일 최대 거래", min: 10, max: 500, step: 10, format: (v) => `${v}회` },
+  { section: "risk", key: "consecutive_loss_limit", label: "연속 손실 한도", min: 3, max: 20, step: 1, format: (v) => `${v}회` },
+  { section: "risk", key: "cooldown_minutes", label: "쿨다운 시간", min: 5, max: 120, step: 5, format: (v) => `${v}분` },
+  { section: "paper_trading", key: "max_position_pct", label: "포지션 최대 비중", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { section: "paper_trading", key: "max_open_positions", label: "동시 포지션 수", min: 1, max: 10, step: 1, format: (v) => `${v}개` },
+  { section: "paper_trading", key: "max_additional_buys", label: "최대 추가매수 횟수", min: 0, max: 10, step: 1, format: (v) => `${v}회` },
+  { section: "paper_trading", key: "additional_buy_drop_pct", label: "추가매수 하락률", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { section: "paper_trading", key: "additional_buy_ratio", label: "추가매수 비율", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
 ];
 
 export default function Risk() {
