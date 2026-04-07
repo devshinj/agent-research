@@ -64,6 +64,12 @@ interface PortfolioPosition {
   unrealized_pnl: string;
   pnl_pct: string;
   eval_amount: string;
+  add_count: number;
+  total_invested: string;
+  partial_sold: boolean;
+  trade_mode: string;
+  stop_loss_price: string | null;
+  take_profit_price: string | null;
 }
 
 interface SummaryData {
@@ -169,7 +175,7 @@ function MarketRow({
   const cls = changeClass(item.change);
   return (
     <div
-      className={`exchange-market-row${selected ? " selected" : ""} ${flash}`}
+      className={`exchange-market-row${selected ? " selected" : ""}${item.is_screened ? " exchange-screened-row" : ""} ${flash}`}
       onClick={onClick}
     >
       <div className="market-name">
@@ -350,10 +356,10 @@ function OrderPanel({
               onChange={(e) => setAmount(e.target.value)}
             />
             <div className="order-presets">
-              <button className="btn" onClick={() => setPreset(0.25)}>25%</button>
-              <button className="btn" onClick={() => setPreset(0.50)}>50%</button>
-              <button className="btn" onClick={() => setPreset(0.75)}>75%</button>
-              <button className="btn" onClick={() => setPreset(1.00)}>100%</button>
+              <button className="btn btn-ghost" onClick={() => setPreset(0.25)}>25%</button>
+              <button className="btn btn-ghost" onClick={() => setPreset(0.50)}>50%</button>
+              <button className="btn btn-ghost" onClick={() => setPreset(0.75)}>75%</button>
+              <button className="btn btn-ghost" onClick={() => setPreset(1.00)}>100%</button>
             </div>
             <div className="order-info-row">
               <span className="order-label">예상 수량</span>
@@ -382,10 +388,10 @@ function OrderPanel({
                   </span>
                 </div>
                 <div className="order-presets">
-                  <button className="btn" onClick={() => handleSell("0.25")}>25%</button>
-                  <button className="btn" onClick={() => handleSell("0.50")}>50%</button>
-                  <button className="btn" onClick={() => handleSell("0.75")}>75%</button>
-                  <button className="btn btn-accent" onClick={() => handleSell("1")}>전량</button>
+                  <button className="btn btn-ghost" onClick={() => handleSell("0.25")}>25%</button>
+                  <button className="btn btn-ghost" onClick={() => handleSell("0.50")}>50%</button>
+                  <button className="btn btn-ghost" onClick={() => handleSell("0.75")}>75%</button>
+                  <button className="btn btn-sell" onClick={() => handleSell("1")}>전량</button>
                 </div>
 
                 <div className="exit-orders-section">
@@ -467,12 +473,12 @@ function ExchangeDetail({
           entry_price: pos.avg_price,
           quantity: pos.quantity,
           unrealized_pnl: pos.unrealized_pnl,
-          add_count: 0,
-          total_invested: pos.eval_amount,
-          partial_sold: false,
-          trade_mode: "AUTO",
-          stop_loss_price: null,
-          take_profit_price: null,
+          add_count: pos.add_count ?? 0,
+          total_invested: pos.total_invested ?? pos.eval_amount,
+          partial_sold: pos.partial_sold ?? false,
+          trade_mode: pos.trade_mode ?? "AUTO",
+          stop_loss_price: pos.stop_loss_price ?? null,
+          take_profit_price: pos.take_profit_price ?? null,
         });
       } else {
         setPosition(null);
@@ -740,7 +746,7 @@ export default function Exchange() {
             <div className="exchange-market-list">
               {screened.length > 0 && (
                 <>
-                  <div className="exchange-section-label screened-section">스크리닝 통과</div>
+                  <div className="exchange-section-label screened-section">스크리닝 통과 ({screened.length})</div>
                   {screened.map((m) => (
                     <MarketRow
                       key={m.market}
@@ -750,6 +756,7 @@ export default function Exchange() {
                       flash={flashes[m.market] ?? ""}
                     />
                   ))}
+                  <div className="exchange-screened-divider" />
                 </>
               )}
               <div className="exchange-section-label">전체</div>
