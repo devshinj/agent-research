@@ -27,6 +27,13 @@ ACCESS_TOKEN_EXPIRE = timedelta(minutes=30)
 REFRESH_TOKEN_EXPIRE = timedelta(days=7)
 
 
+def configure_auth(access_expire_minutes: int, refresh_expire_days: int) -> None:
+    """Update token expiration from settings. Called once at startup."""
+    global ACCESS_TOKEN_EXPIRE, REFRESH_TOKEN_EXPIRE
+    ACCESS_TOKEN_EXPIRE = timedelta(minutes=access_expire_minutes)
+    REFRESH_TOKEN_EXPIRE = timedelta(days=refresh_expire_days)
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 

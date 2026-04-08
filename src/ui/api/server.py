@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.ui.api.auth import decode_token
+from src.ui.api.auth import configure_auth, decode_token
 from src.ui.api.routes import control, dashboard, exchange, portfolio, risk, strategy
 from src.ui.api.routes import auth as auth_router
 from src.ui.api.routes import admin as admin_router
@@ -33,6 +33,13 @@ def create_app() -> FastAPI:
     app.include_router(risk.router, prefix="/api/risk", tags=["risk"])
     app.include_router(control.router, prefix="/api/control", tags=["control"])
     app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
+
+    @app.on_event("startup")
+    async def _configure_auth_on_startup() -> None:
+        app_instance = getattr(app.state, "app", None)
+        if app_instance:
+            cfg = app_instance.settings.auth
+            configure_auth(cfg.access_token_expire_minutes, cfg.refresh_token_expire_days)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
