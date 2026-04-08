@@ -18,6 +18,7 @@ from src.repository.database import Database
 from src.repository.order_repo import OrderRepository
 from src.repository.portfolio_repo import PortfolioRepository
 from src.repository.signal_repo import SignalRepository
+from src.repository.user_repo import UserRepo
 from src.runtime.event_bus import EventBus
 from src.runtime.scheduler import Scheduler
 from src.service.collector import Collector
@@ -91,7 +92,7 @@ class App:
             float(settings.strategy.threshold_pct),
         )
 
-        # State
+        # State (kept as fallback)
         self.account = PaperAccount(
             initial_balance=settings.paper_trading.initial_balance,
             cash_balance=settings.paper_trading.initial_balance,
@@ -100,10 +101,14 @@ class App:
         self.screened_markets: list[str] = []
         self.training_in_progress: dict[str, float] = {}  # market -> start epoch
         self._ws_outbox: list[dict[str, object]] = []
-        # Accumulated realized PnL for today's daily summary
-        self._today_realized_pnl = Decimal("0")
-        self._today_wins = 0
-        self._today_losses = 0
+
+        # Multi-user state
+        self.user_accounts: dict[int, PaperAccount] = {}
+        self.user_risk: dict[int, RiskManager] = {}
+        self.user_pnl: dict[int, dict] = {}  # {user_id: {realized, wins, losses}}
+
+        # User repository
+        self.user_repo = UserRepo(self.db)
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -114,25 +119,49 @@ class App:
             for c in reversed(candles)
         ])
 
+    async def load_user(self, user_id: int) -> None:
+        """Load or reload a user's account and risk manager."""
+        settings_row = await self.user_repo.get_settings(user_id)
+        if not settings_row:
+            return
+
+        # Load account from DB
+        account = await self.portfolio_repo.load_account(user_id)
+        if account is None:
+            initial = Decimal(settings_row["initial_balance"])
+            account = PaperAccount(
+                initial_balance=initial, cash_balance=initial,
+            )
+        self.user_accounts[user_id] = account
+
+        # Load risk manager with user settings
+        risk_config = dataclasses.replace(
+            self.settings.risk,
+            stop_loss_pct=Decimal(settings_row["stop_loss_pct"]),
+            take_profit_pct=Decimal(settings_row["take_profit_pct"]),
+            trailing_stop_pct=Decimal(settings_row["trailing_stop_pct"]),
+            max_daily_loss_pct=Decimal(settings_row["max_daily_loss_pct"]),
+        )
+        rm = RiskManager(risk_config, self.settings.paper_trading)
+        risk_state = await self.portfolio_repo.load_risk_state(user_id)
+        if risk_state:
+            rm.load_state(risk_state)
+        self.user_risk[user_id] = rm
+
+        # Init daily PnL tracking
+        self.user_pnl[user_id] = {
+            "realized": Decimal("0"), "wins": 0, "losses": 0,
+        }
+
     async def start(self) -> None:
         logger.info("Starting Crypto Paper Trader...")
         await self.db.initialize()
 
-        # Restore persisted state
-        saved_account = await self.portfolio_repo.load_account(
-            self.settings.paper_trading.initial_balance,
-        )
-        if saved_account is not None:
-            self.account = saved_account
-            logger.info(
-                "Restored account — cash: %s, positions: %d",
-                self.account.cash_balance, len(self.account.positions),
-            )
-
-        saved_risk = await self.portfolio_repo.load_risk_state()
-        if saved_risk is not None:
-            self.risk_manager.load_state(saved_risk)
-            logger.info("Restored risk state — %s", saved_risk)
+        # Load all active users
+        active_ids = await self.user_repo.get_active_user_ids()
+        for uid in active_ids:
+            await self.load_user(uid)
+        logger.info("Loaded %d active users", len(active_ids))
 
         # Wire event handlers
         self.event_bus.subscribe(SignalEvent, self._on_signal)
@@ -270,41 +299,46 @@ class App:
         logger.info("Retrain complete: %d/%d markets updated", trained, len(self.screened_markets))
 
     async def stop(self) -> None:
-        await self._save_state()
+        await self._save_all_states()
         await self.scheduler.cancel_all()
         await self.upbit_ws.stop()
         await self.upbit.close()
         await self.db.close()
         logger.info("App stopped.")
 
-    async def reset(self, new_settings: Settings) -> None:
+    async def reset(self, new_settings: Settings, user_id: int | None = None) -> None:
         """Reset trading data and reinitialize with new settings."""
         self.paused = True
-        await self.db.reset_trading_data()
+        await self.db.reset_trading_data(user_id)
 
-        self.settings = new_settings
-        self.risk_manager = RiskManager(new_settings.risk, new_settings.paper_trading)
-        self.paper_engine = PaperEngine(new_settings.paper_trading)
-        self.portfolio_manager = PortfolioManager(new_settings.risk)
-        self.screener = Screener(new_settings.screening)
-        self.predictor = Predictor(self.feature_builder, float(new_settings.strategy.min_confidence))
-        self.trainer = Trainer(
-            self.feature_builder,
-            new_settings.data.model_dir,
-            new_settings.strategy.lookahead_minutes,
-            float(new_settings.strategy.threshold_pct),
-        )
-
-        self.account = PaperAccount(
-            initial_balance=new_settings.paper_trading.initial_balance,
-            cash_balance=new_settings.paper_trading.initial_balance,
-        )
-
-        # Reload models from disk and retrain any missing ones
-        loaded = await self._load_existing_models()
-        logger.info("Reset: loaded %d existing models", loaded)
-        await self._refresh_screening()
-        await self._train_missing_models()
+        if user_id is None:
+            # Full reset (admin)
+            self.settings = new_settings
+            self.risk_manager = RiskManager(new_settings.risk, new_settings.paper_trading)
+            self.paper_engine = PaperEngine(new_settings.paper_trading)
+            self.portfolio_manager = PortfolioManager(new_settings.risk)
+            self.screener = Screener(new_settings.screening)
+            self.predictor = Predictor(self.feature_builder, float(new_settings.strategy.min_confidence))
+            self.trainer = Trainer(
+                self.feature_builder,
+                new_settings.data.model_dir,
+                new_settings.strategy.lookahead_minutes,
+                float(new_settings.strategy.threshold_pct),
+            )
+            self.account = PaperAccount(
+                initial_balance=new_settings.paper_trading.initial_balance,
+                cash_balance=new_settings.paper_trading.initial_balance,
+            )
+            self.user_accounts.clear()
+            self.user_risk.clear()
+            self.user_pnl.clear()
+            loaded = await self._load_existing_models()
+            logger.info("Reset: loaded %d existing models", loaded)
+            await self._refresh_screening()
+            await self._train_missing_models()
+        else:
+            # Per-user reset
+            await self.load_user(user_id)
 
         self.paused = False
 
@@ -476,33 +510,47 @@ class App:
                     logger.warning("%s: no trained model loaded — skipping prediction", market)
 
     async def _on_signal(self, event: SignalEvent) -> None:
-        if self.paused or not self.trading_enabled:
-            logger.debug("Signal ignored (%s %s) — trading disabled", event.signal_type.name, event.market)
+        if self.paused:
             return
-
-        from src.types.enums import SignalType
 
         signal_model = __import__("src.types.models", fromlist=["Signal"]).Signal(
             event.market, event.signal_type, event.confidence, event.timestamp,
         )
-        approved, reason = self.risk_manager.approve(signal_model, self.account)
+
+        for user_id, account in list(self.user_accounts.items()):
+            settings_row = await self.user_repo.get_settings(user_id)
+            if not settings_row or not settings_row["trading_enabled"]:
+                continue
+
+            rm = self.user_risk.get(user_id)
+            if rm is None:
+                continue
+
+            await self._process_signal_for_user(
+                event, signal_model, user_id, account, rm,
+            )
+
+    async def _process_signal_for_user(
+        self, event: SignalEvent, signal_model: Any,
+        user_id: int, account: PaperAccount, rm: RiskManager,
+    ) -> None:
+        from src.types.enums import SignalType
+
+        approved, reason = rm.approve(signal_model, account)
         if not approved:
-            logger.info("Signal rejected for %s: %s", event.market, reason)
             return
 
         if event.signal_type == SignalType.BUY:
-            existing = self.account.positions.get(event.market)
+            existing = account.positions.get(event.market)
             is_additional = existing is not None
 
-            # 추가매수: 하락률 조건 체크
             if is_additional:
-                assert existing is not None  # narrowing for mypy
+                assert existing is not None
                 tickers = await self.upbit.fetch_tickers([event.market])
                 if not tickers:
                     return
                 price = tickers[0]["price"]
-                if not self.risk_manager.should_additional_buy(existing, price):
-                    logger.info("추가매수 조건 미충족 for %s", event.market)
+                if not rm.should_additional_buy(existing, price):
                     return
             else:
                 tickers = await self.upbit.fetch_tickers([event.market])
@@ -510,7 +558,6 @@ class App:
                     return
                 price = tickers[0]["price"]
 
-            # 저점 매수 스코어 체크 (신규 매수만)
             if not is_additional:
                 async with self._db_lock:
                     candles = await self.candle_repo.get_latest(
@@ -521,44 +568,39 @@ class App:
                     features = self.feature_builder.build(df)
                     entry_score = self.entry_analyzer.score_entry(df, features)
                     if entry_score < self.settings.entry_analyzer.min_entry_score:
-                        logger.info(
-                            "Entry score too low for %s: %.2f < %.2f",
-                            event.market, entry_score,
-                            self.settings.entry_analyzer.min_entry_score,
-                        )
                         return
 
-            invest = self.risk_manager.calculate_position_size(
-                self.account, Decimal(str(event.confidence)),
+            invest = rm.calculate_position_size(
+                account, Decimal(str(event.confidence)),
                 is_additional=is_additional,
             )
             order = self.paper_engine.execute_buy(
-                self.account, event.market, price, invest, event.confidence,
+                account, event.market, price, invest, event.confidence,
             )
-            await self.order_repo.save(order)
-            self.risk_manager.record_trade()
+            await self.order_repo.save(order, user_id)
+            rm.record_trade()
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
         elif event.signal_type == SignalType.SELL:
-            position = self.account.positions.get(event.market)
+            position = account.positions.get(event.market)
             if position is None:
                 return
             if position.trade_mode == "MANUAL":
-                logger.info("Skipping ML SELL for MANUAL position %s", event.market)
                 return
             tickers = await self.upbit.fetch_tickers([event.market])
             if not tickers:
                 return
             price = tickers[0]["price"]
-            position = self.account.positions[event.market]
             entry_price = position.entry_price
             quantity = position.quantity
             order = self.paper_engine.execute_sell(
-                self.account, event.market, price, "ML_SIGNAL",
+                account, event.market, price, "ML_SIGNAL",
             )
-            await self.order_repo.save(order)
-            self.risk_manager.record_trade()
-            self._record_trade_result(entry_price, order.fill_price, quantity)
+            await self.order_repo.save(order, user_id)
+            rm.record_trade()
+            self._record_trade_result_for_user(
+                user_id, entry_price, order.fill_price, quantity,
+            )
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
     async def _on_trade(self, event: TradeEvent) -> None:
@@ -566,139 +608,160 @@ class App:
             "Trade executed: %s %s @ %s",
             event.order.side.value, event.order.market, event.order.fill_price,
         )
-        await self._save_state()
+        await self._save_all_states()
 
     async def _monitor_positions(self) -> None:
-        """Check all open positions for exit conditions."""
-        if not self.account.positions:
+        if self.paused:
             return
 
-        markets = list(self.account.positions.keys())
+        for user_id, account in list(self.user_accounts.items()):
+            if not account.positions:
+                continue
+
+            settings_row = await self.user_repo.get_settings(user_id)
+            if not settings_row or not settings_row["trading_enabled"]:
+                continue
+
+            rm = self.user_risk.get(user_id)
+            if rm is None:
+                continue
+
+            await self._monitor_user_positions(user_id, account, rm)
+
+    async def _monitor_user_positions(
+        self, user_id: int, account: PaperAccount, rm: RiskManager,
+    ) -> None:
+        markets = list(account.positions.keys())
         tickers = await self.upbit.fetch_tickers(markets)
         price_map: dict[str, Decimal] = {t["market"]: t["price"] for t in tickers}
 
         exits: list[tuple[str, Decimal, str]] = []
         partial_exits: list[tuple[str, Decimal, Decimal]] = []
 
-        for market, position in self.account.positions.items():
+        for market, position in account.positions.items():
             price = price_map.get(market)
             if price is None:
                 continue
 
             self.portfolio_manager.update_position(position, price)
 
-            if self.trading_enabled:
-                # MANUAL 포지션: 예약 손절/익절만 체크
-                if position.trade_mode == "MANUAL":
-                    manual_reason = self.portfolio_manager.check_manual_exit(position, price)
-                    if manual_reason is not None:
-                        exits.append((market, price, manual_reason))
-                    continue
+            # MANUAL positions
+            if position.trade_mode == "MANUAL":
+                manual_reason = self.portfolio_manager.check_manual_exit(position, price)
+                if manual_reason is not None:
+                    exits.append((market, price, manual_reason))
+                continue
 
-                # AUTO 포지션: 기존 로직
-                # 1. 손절 체크 (최우선)
-                pnl_pct = (price - position.entry_price) / position.entry_price
-                if pnl_pct <= -self.settings.risk.stop_loss_pct:
-                    exits.append((market, price, "STOP_LOSS"))
-                    continue
-                # 2. 부분 익절 체크
-                fraction = self.portfolio_manager.check_partial_exit(position, price)
-                if fraction is not None:
-                    partial_exits.append((market, price, fraction))
-                    continue
-                # 3. 전체 매도 조건 (트레일링, 전체 익절)
-                reason = self.portfolio_manager.check_exit_conditions(position, price)
-                if reason is not None:
-                    exits.append((market, price, reason))
+            # AUTO positions
+            pnl_pct = (price - position.entry_price) / position.entry_price
+            if pnl_pct <= -self.settings.risk.stop_loss_pct:
+                exits.append((market, price, "STOP_LOSS"))
+                continue
+            fraction = self.portfolio_manager.check_partial_exit(position, price)
+            if fraction is not None:
+                partial_exits.append((market, price, fraction))
+                continue
+            reason = self.portfolio_manager.check_exit_conditions(position, price)
+            if reason is not None:
+                exits.append((market, price, reason))
 
         for market, price, reason in exits:
-            position = self.account.positions[market]
+            position = account.positions[market]
             entry_price = position.entry_price
             quantity = position.quantity
-            order = self.paper_engine.execute_sell(self.account, market, price, reason)
-            await self.order_repo.save(order)
-            self.risk_manager.record_trade()
-            self._record_trade_result(entry_price, price, quantity)
+            order = self.paper_engine.execute_sell(account, market, price, reason)
+            await self.order_repo.save(order, user_id)
+            rm.record_trade()
+            self._record_trade_result_for_user(user_id, entry_price, price, quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
             self._ws_outbox.append({
                 "type": "order_filled",
                 "data": {
-                    "market": order.market,
-                    "side": order.side.value,
-                    "reason": order.reason,
-                    "price": str(order.fill_price),
+                    "market": order.market, "side": order.side.value,
+                    "reason": order.reason, "price": str(order.fill_price),
                 },
             })
 
         for market, price, fraction in partial_exits:
-            position = self.account.positions[market]
+            position = account.positions[market]
             entry_price = position.entry_price
             sell_quantity = position.quantity * fraction
             order = self.paper_engine.execute_partial_sell(
-                self.account, market, price, fraction,
+                account, market, price, fraction,
             )
-            await self.order_repo.save(order)
-            self._record_trade_result(entry_price, price, sell_quantity)
+            await self.order_repo.save(order, user_id)
+            self._record_trade_result_for_user(user_id, entry_price, price, sell_quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
             self._ws_outbox.append({
                 "type": "order_filled",
                 "data": {
-                    "market": order.market,
-                    "side": order.side.value,
-                    "reason": order.reason,
-                    "price": str(order.fill_price),
+                    "market": order.market, "side": order.side.value,
+                    "reason": order.reason, "price": str(order.fill_price),
                 },
             })
 
-    def _record_trade_result(
-        self, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
+    def _record_trade_result_for_user(
+        self, user_id: int, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
     ) -> None:
-        """Record win or loss for circuit breaker, daily loss, and realized PnL."""
+        rm = self.user_risk.get(user_id)
+        pnl_data = self.user_pnl.get(user_id)
+        if not rm or pnl_data is None:
+            return
+
         realized = (fill_price - entry_price) * quantity
-        self._today_realized_pnl += realized
+        pnl_data["realized"] += realized
 
         if fill_price >= entry_price:
-            self.risk_manager.record_win()
-            self._today_wins += 1
+            rm.record_win()
+            pnl_data["wins"] += 1
         else:
-            self.risk_manager.record_loss()
-            self._today_losses += 1
+            rm.record_loss()
+            pnl_data["losses"] += 1
             loss_pct = (entry_price - fill_price) / entry_price
-            self.risk_manager.record_daily_loss(loss_pct)
+            rm.record_daily_loss(loss_pct)
 
-    async def _save_state(self) -> None:
-        await self.portfolio_repo.save_account(self.account)
-        await self.portfolio_repo.save_risk_state(self.risk_manager.dump_state())
-        await self._snapshot_daily_summary()
+    async def _save_user_state(self, user_id: int) -> None:
+        account = self.user_accounts.get(user_id)
+        rm = self.user_risk.get(user_id)
+        if not account or not rm:
+            return
+        await self.portfolio_repo.save_account(account, user_id)
+        await self.portfolio_repo.save_risk_state(rm.dump_state(), user_id)
+        await self._snapshot_daily_summary_for_user(user_id)
 
-    async def _snapshot_daily_summary(self) -> None:
-        """Upsert today's equity snapshot into daily_summary."""
+    async def _save_all_states(self) -> None:
+        for user_id in list(self.user_accounts.keys()):
+            await self._save_user_state(user_id)
+
+    async def _snapshot_daily_summary_for_user(self, user_id: int) -> None:
         from datetime import date as date_cls
+
+        account = self.user_accounts.get(user_id)
+        rm = self.user_risk.get(user_id)
+        pnl_data = self.user_pnl.get(user_id)
+        if not account or not rm or pnl_data is None:
+            return
 
         today = date_cls.today().isoformat()
 
-        # Compute current total equity
         current_prices: dict[str, Decimal] = {}
-        if self.account.positions:
-            tickers = await self.upbit.fetch_tickers(list(self.account.positions.keys()))
+        if account.positions:
+            tickers = await self.upbit.fetch_tickers(list(account.positions.keys()))
             for t in tickers:
                 current_prices[t["market"]] = t["price"]
         total_equity = self.portfolio_manager.calculate_total_equity(
-            self.account, current_prices,
+            account, current_prices,
         )
 
-        # Load existing summary to preserve starting_balance
-        existing = await self.portfolio_repo.get_daily_summary(today)
+        existing = await self.portfolio_repo.get_daily_summary(today, user_id)
         starting = existing.starting_balance if existing else total_equity
 
-        # Use live counters for realized PnL and win/loss
-        risk_state = self.risk_manager.dump_state()
+        risk_state = rm.dump_state()
         total_trades = int(risk_state["daily_trades"])
-        realized = self._today_realized_pnl
-        win_trades = self._today_wins
-        loss_trades = self._today_losses
+        realized = pnl_data["realized"]
+        win_trades = pnl_data["wins"]
+        loss_trades = pnl_data["losses"]
 
-        # Max drawdown: track worst intraday dip from starting balance
         drawdown_pct = (
             (starting - total_equity) / starting * 100
             if starting > 0 else Decimal(0)
@@ -716,4 +779,4 @@ class App:
             loss_trades=loss_trades,
             max_drawdown_pct=max_drawdown,
         )
-        await self.portfolio_repo.save_daily_summary(summary)
+        await self.portfolio_repo.save_daily_summary(summary, user_id)
