@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import Exchange from "./pages/Exchange";
 import Strategy from "./pages/Strategy";
 import Risk from "./pages/Risk";
+import Ranking from "./pages/Ranking";
 import System from "./pages/System";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
@@ -87,6 +88,7 @@ function AuthenticatedApp() {
           <li><NavLink to="/exchange"><span className="nav-icon">◇</span> 거래소</NavLink></li>
           <li><NavLink to="/strategy"><span className="nav-icon">&#9650;</span> 전략</NavLink></li>
           <li><NavLink to="/risk"><span className="nav-icon">&#9679;</span> 리스크</NavLink></li>
+          <li><NavLink to="/ranking"><span className="nav-icon">&#9734;</span> 랭킹</NavLink></li>
           <li><NavLink to="/system"><span className="nav-icon">&#9881;</span> 시스템</NavLink></li>
           {auth.isAdmin && <li><NavLink to="/admin"><span className="nav-icon">&#9998;</span> 회원 관리</NavLink></li>}
         </ul>
@@ -116,6 +118,7 @@ function AuthenticatedApp() {
           <Route path="/exchange" element={<Exchange />} />
           <Route path="/strategy" element={<Strategy />} />
           <Route path="/risk" element={<Risk />} />
+          <Route path="/ranking" element={<Ranking />} />
           <Route path="/system" element={<System />} />
           {auth.isAdmin && <Route path="/admin" element={<Admin />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
