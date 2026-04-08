@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import logging
 import os
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Request
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-production")
+logger = logging.getLogger(__name__)
+
+_env_secret = os.environ.get("JWT_SECRET", "")
+if _env_secret:
+    JWT_SECRET = _env_secret
+else:
+    JWT_SECRET = secrets.token_urlsafe(32)
+    logger.warning(
+        "JWT_SECRET not set — using random secret (tokens invalidate on restart)"
+    )
+
 INVITE_CODE = os.environ.get("INVITE_CODE", "")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 
