@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from src.ui.api.auth import (
     INVITE_CODE,
-    hash_password,
-    verify_password,
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
+    verify_password,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -48,8 +48,8 @@ async def register(body: RegisterRequest, request: Request):
             password_hash=hash_password(body.password),
             nickname=body.nickname,
         )
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Email already registered") from exc
 
     # Initialize user account in the running app
     await app.load_user(user["id"])
@@ -94,7 +94,7 @@ async def refresh(body: RefreshRequest, request: Request):
     try:
         payload = decode_token(body.refresh_token)
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=str(e)) from e
 
     if payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid token type")

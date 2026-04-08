@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -31,7 +31,7 @@ def create_access_token(
     payload = {
         "sub": str(user_id),
         "type": "access",
-        "exp": datetime.now(timezone.utc) + expires_delta,
+        "exp": datetime.now(UTC) + expires_delta,
     }
     return jwt.encode(payload, secret, algorithm="HS256")
 
@@ -44,7 +44,7 @@ def create_refresh_token(
     payload = {
         "sub": str(user_id),
         "type": "refresh",
-        "exp": datetime.now(timezone.utc) + expires_delta,
+        "exp": datetime.now(UTC) + expires_delta,
     }
     return jwt.encode(payload, secret, algorithm="HS256")
 
@@ -52,10 +52,10 @@ def create_refresh_token(
 def decode_token(token: str, secret: str = JWT_SECRET) -> dict:
     try:
         payload = jwt.decode(token, secret, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token expired")
-    except jwt.InvalidTokenError:
-        raise ValueError("Invalid token")
+    except jwt.ExpiredSignatureError as exc:
+        raise ValueError("Token expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise ValueError("Invalid token") from exc
     # Convert sub back to int to maintain user_id as integer
     if "sub" in payload:
         try:
@@ -75,7 +75,7 @@ async def get_current_user(request: Request) -> dict:
     try:
         payload = decode_token(token)
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=str(e)) from e
 
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")

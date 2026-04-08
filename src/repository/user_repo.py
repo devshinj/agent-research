@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import aiosqlite
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.repository.database import Database
 
@@ -32,7 +31,7 @@ class UserRepo:
         count = (await cursor.fetchone())[0]
         is_admin = 1 if count == 0 else 0
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         cursor = await conn.execute(
             "INSERT INTO users (email, password_hash, nickname, is_admin, created_at)"
             " VALUES (?, ?, ?, ?, ?)",
