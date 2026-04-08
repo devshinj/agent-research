@@ -662,7 +662,8 @@ function OrderPanel({
               <span className="order-value">{formatPrice(price)}</span>
             </div>
             {orderType === "limit" && (
-              <div style={{ marginBottom: 8 }}>
+              <div className="limit-price-group">
+                <span className="limit-price-label">지정가 (이 가격 이하일 때 매수)</span>
                 <input
                   className="order-input"
                   type="number"
@@ -803,8 +804,10 @@ function OrderPanel({
               {pendingOrders.map((po) => (
                 <div key={po.id} className="pending-order-item">
                   <div className="pending-order-info">
-                    <span className="pending-order-price">₩{formatPrice(po.limit_price)}</span>
-                    <span className="pending-order-amount">{formatKRW(po.amount_krw)}</span>
+                    <div className="pending-order-top">
+                      <span className="pending-order-price">₩{formatPrice(po.limit_price)}</span>
+                      <span className="pending-order-amount">{formatKRW(po.amount_krw)}</span>
+                    </div>
                     <span className="pending-order-expiry">
                       만료 {new Date(po.expires_at * 1000).toLocaleTimeString("ko-KR", {
                         hour: "2-digit", minute: "2-digit",

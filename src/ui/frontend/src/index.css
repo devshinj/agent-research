@@ -1464,6 +1464,101 @@ input[type="range"]::-moz-range-thumb {
   line-height: 1.4;
 }
 
+/* ── Order Type Toggle (시장가/지정가) ── */
+.order-type-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  background: var(--bg-main);
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid var(--border);
+}
+.order-type-btn {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.order-type-btn:hover {
+  color: var(--text);
+}
+.order-type-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 224, 175, 0.25);
+}
+
+/* ── Limit Price Input ── */
+.limit-price-group {
+  margin-bottom: 10px;
+}
+.limit-price-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* ── Pending Orders ── */
+.pending-orders-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.pending-orders-section h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+}
+.pending-order-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pending-order-item:last-child {
+  border-bottom: none;
+}
+.pending-order-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pending-order-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pending-order-price {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.pending-order-amount {
+  font-size: 0.8rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+.pending-order-expiry {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 0.7rem;
+  border-radius: 4px;
+}
+
 /* ── Order Confirm Modal ── */
 .order-confirm-overlay {
   position: fixed;
