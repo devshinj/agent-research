@@ -182,7 +182,7 @@ class PaperEngine:
             price=current_price,
             quantity=quantity,
             status=OrderStatus.FILLED,
-            signal_confidence=0.0,
+            signal_confidence=0,
             reason=reason if reason else "LIMIT_BUY",
             created_at=now,
             fill_price=fill_price,
