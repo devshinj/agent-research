@@ -8,15 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-RUN pip install uv && uv pip install --system --no-cache-dir -r pyproject.toml
+RUN pip install --no-cache-dir uv \
+    && uv pip install --system --no-cache-dir .
 
 # ── Stage 2: React 프론트엔드 빌드 ──
 FROM node:22-slim AS web-builder
 
 WORKDIR /app/frontend
 
-COPY src/ui/frontend/package.json src/ui/frontend/package-lock.json ./
-RUN npm ci
+COPY src/ui/frontend/package.json src/ui/frontend/package-lock.json* ./
+RUN npm ci --ignore-scripts
 
 COPY src/ui/frontend/ ./
 
@@ -32,7 +33,7 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=web-builder /app/frontend/dist /usr/share/nginx/html
 
-EXPOSE 80 443
+EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
 
@@ -43,6 +44,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=py-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
@@ -65,4 +67,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-CMD ["uvicorn", "src.ui.api.server:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "src.main"]

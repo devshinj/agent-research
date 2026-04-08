@@ -9,9 +9,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 .worktrees/
-
-# Deploy secrets
+.git/
 .env
 deploy/.env
 deploy/ssl/*.pem
 *.tar.gz
+node_modules/
+src/ui/frontend/node_modules/
+docs/
+tests/

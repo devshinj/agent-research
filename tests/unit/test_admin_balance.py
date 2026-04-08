@@ -45,6 +45,10 @@ async def test_adjust_balance_credit(repo: UserRepo, two_users):
     new_balance = await repo.get_cash_balance(user["id"])
     assert new_balance == Decimal("8000000")
 
+    # initial_balance should also increase so PnL stays neutral
+    settings = await repo.get_settings(user["id"])
+    assert Decimal(settings["initial_balance"]) == Decimal("8000000")
+
 
 @pytest.mark.asyncio
 async def test_adjust_balance_debit(repo: UserRepo, two_users):

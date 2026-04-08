@@ -16,7 +16,6 @@ class RankingRepo:
     async def get_ranking(self, requesting_user_id: int) -> list[RankingEntry]:
         conn = self._db.conn
 
-        # Get active users with their initial_balance and current cash_balance
         cursor = await conn.execute(
             """
             SELECT u.id, u.nickname,
@@ -39,7 +38,24 @@ class RankingRepo:
             initial_balance = Decimal(initial_str)
             cash_balance = Decimal(cash_str)
 
-            # Get latest ending_balance from daily_summary
+            # Cumulative realized PnL from daily_summary
+            cursor = await conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl), '0') FROM daily_summary"
+                " WHERE user_id = ?",
+                (uid,),
+            )
+            realized_row = await cursor.fetchone()
+            realized_pnl = Decimal(realized_row[0])
+
+            # Return percentage based on realized PnL
+            if initial_balance > 0:
+                return_pct = (
+                    realized_pnl / initial_balance * 100
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                return_pct = Decimal("0")
+
+            # Total equity: latest ending_balance or fallback to cash
             cursor = await conn.execute(
                 "SELECT ending_balance FROM daily_summary"
                 " WHERE user_id = ? ORDER BY date DESC LIMIT 1",
@@ -47,14 +63,6 @@ class RankingRepo:
             )
             latest = await cursor.fetchone()
             total_equity = Decimal(latest[0]) if latest else cash_balance
-
-            # Return percentage
-            if initial_balance > 0:
-                return_pct = (
-                    (total_equity - initial_balance) / initial_balance * 100
-                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            else:
-                return_pct = Decimal("0")
 
             # Aggregated trade stats from daily_summary
             cursor = await conn.execute(
@@ -90,15 +98,14 @@ class RankingRepo:
                 Decimal(r[0]) for r in reversed(equity_rows)
             )
 
-            total_pnl = total_equity - initial_balance
-
             entries.append(RankingEntry(
-                rank=0,  # assigned after sorting
+                rank=0,
                 user_id=uid,
                 nickname=nickname,
                 return_pct=return_pct,
-                total_pnl=total_pnl,
+                realized_pnl=realized_pnl,
                 initial_balance=initial_balance,
+                total_equity=total_equity,
                 win_rate=win_rate,
                 total_trades=total_trades,
                 max_drawdown_pct=max_drawdown_pct,
@@ -106,8 +113,8 @@ class RankingRepo:
                 is_me=(uid == requesting_user_id),
             ))
 
-        # Sort by return_pct descending, assign ranks
-        entries.sort(key=lambda e: e.return_pct, reverse=True)
+        # Sort by realized PnL descending, assign ranks
+        entries.sort(key=lambda e: e.realized_pnl, reverse=True)
         ranked: list[RankingEntry] = []
         for i, entry in enumerate(entries, start=1):
             ranked.append(RankingEntry(
@@ -115,8 +122,9 @@ class RankingRepo:
                 user_id=entry.user_id,
                 nickname=entry.nickname,
                 return_pct=entry.return_pct,
-                total_pnl=entry.total_pnl,
+                realized_pnl=entry.realized_pnl,
                 initial_balance=entry.initial_balance,
+                total_equity=entry.total_equity,
                 win_rate=entry.win_rate,
                 total_trades=entry.total_trades,
                 max_drawdown_pct=entry.max_drawdown_pct,

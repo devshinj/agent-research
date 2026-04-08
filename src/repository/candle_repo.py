@@ -23,7 +23,7 @@ class CandleRepository:
         )
         await self._db.conn.commit()
 
-    async def save_many(self, candles: list[Candle]) -> None:
+    async def save_many(self, candles: list[Candle], *, commit: bool = True) -> None:
         await self._db.conn.executemany(
             """INSERT INTO candles (market, timeframe, timestamp, open, high, low, close, volume)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -34,6 +34,10 @@ class CandleRepository:
               str(c.open), str(c.high), str(c.low),
               str(c.close), str(c.volume)) for c in candles],
         )
+        if commit:
+            await self._db.conn.commit()
+
+    async def commit(self) -> None:
         await self._db.conn.commit()
 
     async def get_latest(self, market: str, timeframe: str, limit: int = 200) -> list[Candle]:

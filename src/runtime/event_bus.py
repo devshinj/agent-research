@@ -18,11 +18,24 @@ class EventBus:
     def subscribe(self, event_type: type, handler: Handler) -> None:
         self._handlers[event_type].append(handler)
 
-    async def publish(self, event: object) -> None:
+    async def publish(self, event: object, timeout: float = 30.0) -> None:
         event_type = type(event)
         handlers = self._handlers.get(event_type, [])
-        for handler in handlers:
+        if not handlers:
+            return
+
+        async def _safe_call(handler: Handler) -> None:
             try:
-                await handler(event)
+                await asyncio.wait_for(handler(event), timeout=timeout)
+            except TimeoutError:
+                logger.error(
+                    "Handler %s for %s timed out after %.1fs",
+                    handler.__name__, event_type.__name__, timeout,
+                )
             except Exception:
-                logger.exception("Error in handler %s for %s", handler.__name__, event_type.__name__)
+                logger.exception(
+                    "Error in handler %s for %s",
+                    handler.__name__, event_type.__name__,
+                )
+
+        await asyncio.gather(*(_safe_call(h) for h in handlers))

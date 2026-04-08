@@ -92,6 +92,19 @@ async def reset(
     return {"status": "running"}
 
 
+@router.post("/reset-account")
+async def reset_account(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, str]:
+    """Reset the current user's account (balance, positions, orders)."""
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        raise HTTPException(status_code=503, detail="Not ready")
+
+    await app.reset(app.settings, user_id=user["id"])
+    return {"status": "reset"}
+
+
 @router.patch("/config")
 async def patch_config(
     request: Request, _: dict = Depends(require_admin)
@@ -118,6 +131,23 @@ async def patch_config(
     return result
 
 
+_USER_CONFIG_FIELDS = {
+    "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
+    "max_daily_loss_pct", "max_position_pct", "max_open_positions",
+}
+
+
+@router.get("/user-config")
+async def get_user_config(
+    request: Request, user: dict = Depends(get_current_user)  # noqa: B008
+) -> dict[str, Any]:
+    app = getattr(request.app.state, "app", None)
+    if not app:
+        raise HTTPException(status_code=503, detail="Not ready")
+    settings = await app.user_repo.get_settings(user["id"])
+    return {k: settings[k] for k in _USER_CONFIG_FIELDS if k in settings}
+
+
 @router.patch("/user-config")
 async def patch_user_config(
     request: Request, user: dict = Depends(get_current_user)
@@ -126,11 +156,7 @@ async def patch_user_config(
     if not app:
         raise HTTPException(status_code=503, detail="Not ready")
     body = await request.json()
-    allowed = {
-        "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
-        "max_daily_loss_pct", "max_position_pct", "max_open_positions",
-    }
-    patches = {k: v for k, v in body.items() if k in allowed}
+    patches = {k: v for k, v in body.items() if k in _USER_CONFIG_FIELDS}
     if not patches:
         raise HTTPException(status_code=400, detail="No valid fields")
     await app.user_repo.update_settings(user["id"], patches)

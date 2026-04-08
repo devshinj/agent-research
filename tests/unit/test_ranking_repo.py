@@ -89,7 +89,7 @@ async def test_ranking_single_user(repos):
     assert entry.rank == 1
     assert entry.nickname == "Alice"
     assert entry.return_pct == Decimal("10.00")  # (1100000-1000000)/1000000*100
-    assert entry.total_pnl == Decimal("100000")  # 1100000-1000000
+    assert entry.realized_pnl == Decimal("100000")  # 1100000-1000000
     assert entry.initial_balance == Decimal("1000000")
     assert entry.total_trades == 8  # 5+3
     assert entry.win_rate == Decimal("62.50")  # 5/(5+3)*100
@@ -100,7 +100,7 @@ async def test_ranking_single_user(repos):
 
 @pytest.mark.asyncio
 async def test_ranking_order(repos):
-    """Two users, ranked by return_pct descending."""
+    """Two users, ranked by realized_pnl descending."""
     uid1 = await _create_user(repos, "a@test.com", "Alice", "1000000", "1200000")
     uid2 = await _create_user(repos, "b@test.com", "Bob", "1000000", "1100000")
 

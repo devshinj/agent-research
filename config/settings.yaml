@@ -19,24 +19,24 @@ risk:
   partial_take_profit_pct: 0.04
   partial_sell_fraction: 0.5
 screening:
-  min_volume_krw: 500000000
-  min_volatility_pct: 1.0
-  max_volatility_pct: 15.0
-  max_coins: 5
+  min_volume_krw: 1000000000
+  min_volatility_pct: 3
+  max_volatility_pct: 30
+  max_coins: 8
   refresh_interval_min: 30
   always_include:
   - KRW-BTC
 strategy:
   lookahead_minutes: 5
-  threshold_pct: 0.3
-  retrain_interval_hours: 6
-  min_confidence: 0.3
+  threshold_pct: 0.2
+  retrain_interval_hours: 1
+  min_confidence: 0.35
 collector:
   candle_timeframe: 1
   max_candles_per_market: 500
   market_refresh_interval_min: 60
 entry_analyzer:
-  min_entry_score: 0.5
+  min_entry_score: 0.3
   price_lookback_candles: 60
 data:
   db_path: data/paper_trader.db
@@ -47,5 +47,3 @@ data:
 auth:
   access_token_expire_minutes: 30
   refresh_token_expire_days: 7
-agent:
-  gemini_api_key: ""

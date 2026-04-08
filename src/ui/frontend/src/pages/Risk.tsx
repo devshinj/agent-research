@@ -30,8 +30,16 @@ interface ConfigValues {
   };
 }
 
+interface UserConfig {
+  stop_loss_pct: number;
+  take_profit_pct: number;
+  trailing_stop_pct: number;
+  max_daily_loss_pct: number;
+  max_position_pct: number;
+  max_open_positions: number;
+}
+
 interface SliderDef {
-  section: "risk" | "paper_trading";
   key: string;
   label: string;
   desc: string;
@@ -41,32 +49,48 @@ interface SliderDef {
   format: (v: number) => string;
 }
 
-const SLIDERS: SliderDef[] = [
-  { section: "risk", key: "stop_loss_pct", label: "손절 기준", desc: "평균 매수가 대비 이 비율만큼 하락하면 즉시 전량 매도합니다", min: 0.005, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
-  { section: "risk", key: "take_profit_pct", label: "전량 익절 기준", desc: "평균 매수가 대비 이 비율만큼 상승하면 전량 매도합니다", min: 0.02, max: 0.2, step: 0.01, format: (v) => `${(v * 100).toFixed(0)}%` },
-  { section: "risk", key: "trailing_stop_pct", label: "트레일링 스톱", desc: "수익 상태에서 고점 대비 이 비율만큼 하락하면 매도합니다 (손실 상태에서는 발동하지 않음)", min: 0.005, max: 0.05, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+interface GlobalSliderDef extends SliderDef {
+  section: "risk" | "paper_trading";
+}
+
+const PERSONAL_SLIDERS: SliderDef[] = [
+  { key: "stop_loss_pct", label: "손절 기준", desc: "평균 매수가 대비 이 비율만큼 하락하면 즉시 전량 매도합니다", min: 0.005, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { key: "take_profit_pct", label: "전량 익절 기준", desc: "평균 매수가 대비 이 비율만큼 상승하면 전량 매도합니다", min: 0.02, max: 0.2, step: 0.01, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: "trailing_stop_pct", label: "트레일링 스톱", desc: "수익 상태에서 고점 대비 이 비율만큼 하락하면 매도합니다 (손실 상태에서는 발동하지 않음)", min: 0.005, max: 0.05, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
+  { key: "max_daily_loss_pct", label: "일일 최대 손실", desc: "하루 누적 손실이 이 비율을 초과하면 자동매매가 중단됩니다", min: 0.01, max: 0.2, step: 0.01, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: "max_position_pct", label: "포지션 최대 비중", desc: "총 자산 대비 단일 포지션에 투자할 수 있는 최대 비율입니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
+  { key: "max_open_positions", label: "동시 포지션 수", desc: "동시에 보유할 수 있는 최대 포지션(코인) 수입니다", min: 1, max: 10, step: 1, format: (v) => `${v}개` },
+];
+
+const GLOBAL_SLIDERS: GlobalSliderDef[] = [
   { section: "risk", key: "partial_take_profit_pct", label: "부분 익절 기준", desc: "평균 매수가 대비 이 비율 이상 수익이면 보유 수량의 일부를 먼저 매도합니다", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
   { section: "risk", key: "partial_sell_fraction", label: "부분 매도 비율", desc: "부분 익절 시 보유 수량 중 매도할 비율입니다 (예: 50% = 절반 매도)", min: 0.1, max: 0.9, step: 0.1, format: (v) => `${(v * 100).toFixed(0)}%` },
   { section: "risk", key: "max_daily_trades", label: "일일 최대 거래", desc: "하루에 실행할 수 있는 최대 거래 횟수입니다. 초과 시 매수가 차단됩니다", min: 10, max: 500, step: 10, format: (v) => `${v}회` },
   { section: "risk", key: "consecutive_loss_limit", label: "연속 손실 한도", desc: "연속으로 이 횟수만큼 손실이 발생하면 서킷 브레이커가 발동됩니다", min: 3, max: 20, step: 1, format: (v) => `${v}회` },
   { section: "risk", key: "cooldown_minutes", label: "쿨다운 시간", desc: "서킷 브레이커 발동 후 매매를 재개하기까지 대기하는 시간입니다", min: 5, max: 120, step: 5, format: (v) => `${v}분` },
-  { section: "paper_trading", key: "max_position_pct", label: "포지션 최대 비중", desc: "총 자산 대비 단일 포지션에 투자할 수 있는 최대 비율입니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
-  { section: "paper_trading", key: "max_open_positions", label: "동시 포지션 수", desc: "동시에 보유할 수 있는 최대 포지션(코인) 수입니다", min: 1, max: 10, step: 1, format: (v) => `${v}개` },
   { section: "paper_trading", key: "max_additional_buys", label: "최대 추가매수 횟수", desc: "같은 코인에 대해 추가 매수(물타기)할 수 있는 최대 횟수입니다", min: 0, max: 10, step: 1, format: (v) => `${v}회` },
   { section: "paper_trading", key: "additional_buy_drop_pct", label: "추가매수 하락률", desc: "평균 매수가 대비 이 비율 이상 하락해야 추가매수가 발동됩니다", min: 0.01, max: 0.1, step: 0.005, format: (v) => `${(v * 100).toFixed(1)}%` },
   { section: "paper_trading", key: "additional_buy_ratio", label: "추가매수 비율", desc: "추가매수 금액 = 기본 포지션 사이즈 x 이 비율입니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%` },
 ];
 
 export default function Risk() {
-  const { api } = useAuthContext();
+  const { auth, api } = useAuthContext();
   const { get, patchJson } = api;
   const [status, setStatus] = useState<RiskStatus | null>(null);
+
+  // Personal user config
+  const [userConfig, setUserConfig] = useState<UserConfig | null>(null);
+  const [userForm, setUserForm] = useState<Record<string, number>>({});
+  const [userSaving, setUserSaving] = useState(false);
+  const [userFeedback, setUserFeedback] = useState<string | null>(null);
+
+  // Global admin config
   const [config, setConfig] = useState<ConfigValues | null>(null);
   const [form, setForm] = useState<Record<string, Record<string, number>>>({});
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // Fetch risk status
+  // Fetch risk status (all users)
   useEffect(() => {
     get<RiskStatus>("/api/risk/status").then(setStatus);
     const interval = setInterval(() => {
@@ -75,8 +99,17 @@ export default function Risk() {
     return () => clearInterval(interval);
   }, [get]);
 
-  // Fetch config
+  // Fetch personal config (all users)
   useEffect(() => {
+    get<UserConfig>("/api/control/user-config").then((data) => {
+      setUserConfig(data);
+      setUserForm({ ...data });
+    });
+  }, [get]);
+
+  // Fetch global config (admin only)
+  useEffect(() => {
+    if (!auth.isAdmin) return;
     get<ConfigValues>("/api/control/config").then((data) => {
       setConfig(data);
       setForm({
@@ -84,18 +117,56 @@ export default function Risk() {
         paper_trading: { ...data.paper_trading },
       });
     });
-  }, [get]);
+  }, [get, auth.isAdmin]);
 
+  // ── Personal slider handlers ──
+  const handleUserSlider = (key: string, value: number) => {
+    setUserForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const hasUserChanges = (): boolean => {
+    if (!userConfig) return false;
+    return PERSONAL_SLIDERS.some(({ key }) => userForm[key] !== userConfig[key as keyof UserConfig]);
+  };
+
+  const handleUserReset = () => {
+    if (!userConfig) return;
+    setUserForm({ ...userConfig });
+  };
+
+  const handleUserApply = async () => {
+    if (!userConfig) return;
+    setUserSaving(true);
+    setUserFeedback(null);
+    const patch: Record<string, number> = {};
+    for (const { key } of PERSONAL_SLIDERS) {
+      const orig = userConfig[key as keyof UserConfig];
+      if (userForm[key] !== undefined && userForm[key] !== orig) {
+        patch[key] = userForm[key];
+      }
+    }
+    try {
+      await patchJson("/api/control/user-config", patch);
+      const updated = await get<UserConfig>("/api/control/user-config");
+      setUserConfig(updated);
+      setUserForm({ ...updated });
+      setUserFeedback("적용 완료");
+      setTimeout(() => setUserFeedback(null), 3000);
+    } catch {
+      setUserFeedback("적용 실패");
+    } finally {
+      setUserSaving(false);
+    }
+  };
+
+  // ── Global slider handlers (admin) ──
   const handleSlider = (section: string, key: string, value: number) => {
-    setForm((prev) => ({
-      ...prev,
-      [section]: { ...prev[section], [key]: value },
-    }));
+    setForm((prev) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
   };
 
   const hasChanges = (): boolean => {
     if (!config) return false;
-    return SLIDERS.some(({ section, key }) => {
+    return GLOBAL_SLIDERS.some(({ section, key }) => {
       const orig = (config[section] as Record<string, number>)[key];
       return form[section]?.[key] !== orig;
     });
@@ -103,19 +174,15 @@ export default function Risk() {
 
   const handleReset = () => {
     if (!config) return;
-    setForm({
-      risk: { ...config.risk },
-      paper_trading: { ...config.paper_trading },
-    });
+    setForm({ risk: { ...config.risk }, paper_trading: { ...config.paper_trading } });
   };
 
   const handleApply = async () => {
     if (!config) return;
     setSaving(true);
     setFeedback(null);
-
     const patch: Record<string, Record<string, number>> = {};
-    for (const { section, key } of SLIDERS) {
+    for (const { section, key } of GLOBAL_SLIDERS) {
       const orig = (config[section] as Record<string, number>)[key];
       const curr = form[section]?.[key];
       if (curr !== undefined && curr !== orig) {
@@ -123,14 +190,10 @@ export default function Risk() {
         patch[section][key] = curr;
       }
     }
-
     try {
       const res = await patchJson<{ config: ConfigValues }>("/api/control/config", patch);
       setConfig(res.config);
-      setForm({
-        risk: { ...res.config.risk },
-        paper_trading: { ...res.config.paper_trading },
-      });
+      setForm({ risk: { ...res.config.risk }, paper_trading: { ...res.config.paper_trading } });
       setFeedback("적용 완료");
       setTimeout(() => setFeedback(null), 3000);
     } catch {
@@ -140,8 +203,10 @@ export default function Risk() {
     }
   };
 
-  // Derive limits from config (with fallbacks matching settings.yaml defaults)
-  const dailyLossLimit = config?.risk.max_daily_loss_pct ?? 10;
+  // Derive limits
+  const dailyLossLimit = userForm.max_daily_loss_pct
+    ? userForm.max_daily_loss_pct * 100
+    : 10;
   const consecutiveLossLimit = form.risk?.consecutive_loss_limit ?? config?.risk.consecutive_loss_limit ?? 10;
   const dailyTradesLimit = form.risk?.max_daily_trades ?? config?.risk.max_daily_trades ?? 200;
 
@@ -222,7 +287,7 @@ export default function Risk() {
         <div className="card">
           <div className="label">일일 손실</div>
           <div className="value" style={{ fontSize: 20, color: lossLevel > 0 ? "var(--loss)" : "var(--text)" }}>
-            {status.daily_loss_pct}%
+            {Number(status.daily_loss_pct).toFixed(2)}%
           </div>
           <div style={{ marginTop: 12 }}>
             <div className="progress-bar">
@@ -230,7 +295,7 @@ export default function Risk() {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
               <span>0%</span>
-              <span>-{dailyLossLimit}% 한도</span>
+              <span>-{dailyLossLimit.toFixed(0)}% 한도</span>
             </div>
           </div>
         </div>
@@ -280,18 +345,18 @@ export default function Risk() {
         </div>
       </div>
 
-      {/* ── Risk Sliders ──────────────────── */}
+      {/* ── Personal Risk Sliders ─────────── */}
       <div className="panel">
         <div className="panel-header">
-          <h3>투자 성향 조절</h3>
-          {feedback && (
-            <span className={`badge ${feedback === "적용 완료" ? "profit" : "loss"}`}>
-              {feedback}
+          <h3>내 투자 성향</h3>
+          {userFeedback && (
+            <span className={`badge ${userFeedback === "적용 완료" ? "profit" : "loss"}`}>
+              {userFeedback}
             </span>
           )}
         </div>
         <div className="panel-body">
-          {SLIDERS.map(({ section, key, label, desc, min, max, step, format }) => (
+          {PERSONAL_SLIDERS.map(({ key, label, desc, min, max, step, format }) => (
             <div key={key} className="slider-row">
               <span className="slider-label" data-tooltip={desc}>{label}</span>
               <div className="slider-track">
@@ -300,24 +365,65 @@ export default function Risk() {
                   min={min}
                   max={max}
                   step={step}
-                  value={form[section]?.[key] ?? min}
-                  onChange={(e) => handleSlider(section, key, Number(e.target.value))}
+                  value={userForm[key] ?? min}
+                  onChange={(e) => handleUserSlider(key, Number(e.target.value))}
                 />
               </div>
-              <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
+              <span className="slider-value">{format(userForm[key] ?? min)}</span>
             </div>
           ))}
 
           <div className="slider-buttons">
-            <button className="btn" onClick={handleReset} disabled={saving || !hasChanges()}>
+            <button className="btn" onClick={handleUserReset} disabled={userSaving || !hasUserChanges()}>
               초기화
             </button>
-            <button className="btn btn-primary" onClick={handleApply} disabled={saving || !hasChanges()}>
-              {saving ? "적용 중..." : "적용"}
+            <button className="btn btn-primary" onClick={handleUserApply} disabled={userSaving || !hasUserChanges()}>
+              {userSaving ? "적용 중..." : "적용"}
             </button>
           </div>
         </div>
       </div>
+
+      {/* ── Global Engine Risk Sliders (admin only) ── */}
+      {auth.isAdmin && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>엔진 리스크 설정</h3>
+            {feedback && (
+              <span className={`badge ${feedback === "적용 완료" ? "profit" : "loss"}`}>
+                {feedback}
+              </span>
+            )}
+          </div>
+          <div className="panel-body">
+            {GLOBAL_SLIDERS.map(({ section, key, label, desc, min, max, step, format }) => (
+              <div key={key} className="slider-row">
+                <span className="slider-label" data-tooltip={desc}>{label}</span>
+                <div className="slider-track">
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={form[section]?.[key] ?? min}
+                    onChange={(e) => handleSlider(section, key, Number(e.target.value))}
+                  />
+                </div>
+                <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
+              </div>
+            ))}
+
+            <div className="slider-buttons">
+              <button className="btn" onClick={handleReset} disabled={saving || !hasChanges()}>
+                초기화
+              </button>
+              <button className="btn btn-primary" onClick={handleApply} disabled={saving || !hasChanges()}>
+                {saving ? "적용 중..." : "적용"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

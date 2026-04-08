@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class UpbitWebSocketService:
+    MAX_CACHE_SIZE = 500
+
     def __init__(self, upbit_client: UpbitClient | None = None) -> None:
         self._client = upbit_client
         self._cache: dict[str, dict[str, Any]] = {}
@@ -29,6 +32,7 @@ class UpbitWebSocketService:
         self._consecutive_failures: int = 0
         self._fallback_polling = False
         self._poll_task: asyncio.Task[None] | None = None
+        self._run_task: asyncio.Task[None] | None = None
         self.status: str = "disconnected"
 
     def _parse_ws_ticker(self, raw: dict[str, Any]) -> dict[str, Any]:
@@ -53,12 +57,43 @@ class UpbitWebSocketService:
     async def start(self, markets: list[str]) -> None:
         self._markets = markets
         self._running = True
-        asyncio.create_task(self._run_loop())
+        await self._seed_snapshot(markets)
+        self._run_task = asyncio.create_task(self._run_loop())
+
+    async def _seed_snapshot(self, markets: list[str]) -> None:
+        """Fetch initial ticker data via REST so no market shows price=0."""
+        if not self._client or not markets:
+            return
+        try:
+            for i in range(0, len(markets), 100):
+                chunk = markets[i : i + 100]
+                tickers = await self._client.fetch_tickers(chunk)
+                for t in tickers:
+                    market = t["market"]
+                    if market not in self._cache:
+                        self._cache[market] = {
+                            "market": market,
+                            "price": t["price"],
+                            "change": "EVEN",
+                            "change_rate": t["change_rate"],
+                            "change_price": Decimal("0"),
+                            "volume_24h": Decimal("0"),
+                            "acc_trade_price_24h": t["volume_24h"],
+                            "timestamp": t["timestamp"],
+                        }
+            logger.info("Seeded snapshot for %d markets via REST", len(self._cache))
+        except Exception as e:
+            logger.warning("Failed to seed initial snapshot: %s", e)
 
     async def stop(self) -> None:
         self._running = False
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
+        for task in (self._run_task, self._poll_task):
+            if task and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+        self._run_task = None
+        self._poll_task = None
         if self._ws:
             await self._ws.close()
             self._ws = None
@@ -66,6 +101,10 @@ class UpbitWebSocketService:
 
     def update_markets(self, markets: list[str]) -> None:
         self._markets = markets
+        # Evict cached entries for markets no longer tracked
+        stale = set(self._cache) - set(markets)
+        for key in stale:
+            del self._cache[key]
 
     async def _run_loop(self) -> None:
         while self._running:
@@ -120,6 +159,11 @@ class UpbitWebSocketService:
                     if data.get("type") == "ticker":
                         ticker = self._parse_ws_ticker(data)
                         self._cache[ticker["market"]] = ticker
+                        if len(self._cache) > self.MAX_CACHE_SIZE:
+                            tracked = set(self._markets)
+                            stale = [k for k in self._cache if k not in tracked]
+                            for k in stale:
+                                del self._cache[k]
             finally:
                 health_task.cancel()
 
@@ -161,7 +205,7 @@ class UpbitWebSocketService:
                     self._fallback_polling = False
                     self.status = "connected"
                     await ws.close()
-                    asyncio.create_task(self._run_loop())
+                    self._run_task = asyncio.create_task(self._run_loop())
                     return
             except Exception:
                 pass

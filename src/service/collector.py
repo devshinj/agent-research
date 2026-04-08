@@ -44,8 +44,9 @@ class Collector:
                     market, self._timeframe, self._max_candles
                 )
                 if candles:
-                    await self._repo.save_many(candles)
+                    await self._repo.save_many(candles, commit=False)
                     logger.info("Collected %d candles for %s", len(candles), market)
             except Exception:
                 logger.exception("Failed to collect candles for %s", market)
             await asyncio.sleep(0.11)  # rate limit: ~9 req/s
+        await self._repo.commit()

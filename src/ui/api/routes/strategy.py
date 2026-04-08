@@ -50,6 +50,7 @@ async def get_signals(
         return []
 
     rows = await app.signal_repo.get_recent(limit=limit, include_hold=include_hold)
+    screened = set(app.screened_markets) if app.screened_markets else set()
     return [
         {
             "market": r["market"],
@@ -61,6 +62,7 @@ async def get_signals(
             "basis": json.loads(r["basis"]) if r.get("basis") else None,
         }
         for r in rows
+        if not screened or r["market"] in screened
     ]
 
 

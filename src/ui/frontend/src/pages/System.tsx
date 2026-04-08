@@ -45,7 +45,7 @@ const INFO_FIELDS: { section: keyof SystemConfig; label: string; fields: { key: 
 ];
 
 export default function System() {
-  const { api } = useAuthContext();
+  const { auth, api } = useAuthContext();
   const { get, post, postJson } = api;
   const [status, setStatus] = useState<SystemStatus>("unknown");
   const [tradingEnabled, setTradingEnabled] = useState(false);
@@ -58,8 +58,10 @@ export default function System() {
       setStatus(s.paused ? "paused" : "running");
       setTradingEnabled(s.trading_enabled);
     });
-    get<SystemConfig>("/api/control/config").then(setConfig);
-  }, [get]);
+    if (auth.isAdmin) {
+      get<SystemConfig>("/api/control/config").then(setConfig);
+    }
+  }, [get, auth.isAdmin]);
 
   const handlePause = async () => {
     setLoading(true);
@@ -86,9 +88,13 @@ export default function System() {
   const handleReset = async () => {
     setShowReset(false);
     setLoading(true);
-    const fullConfig = await get("/api/control/config");
-    await postJson("/api/control/reset", fullConfig);
-    setStatus("running");
+    if (auth.isAdmin) {
+      const fullConfig = await get("/api/control/config");
+      await postJson("/api/control/reset", fullConfig);
+      setStatus("running");
+    } else {
+      await post("/api/control/reset-account");
+    }
     setLoading(false);
   };
 
@@ -112,17 +118,19 @@ export default function System() {
             엔진을 일시정지하면 데이터 수집, ML 신호 생성, 포지션 모니터링이 모두 중단됩니다.
             수동 매매는 영향받지 않습니다.
           </p>
-          <div style={{ display: "flex", gap: 12 }}>
-            {status === "running" ? (
-              <button className="btn btn-ghost" onClick={handlePause} disabled={loading}>
-                엔진 일시정지
-              </button>
-            ) : (
-              <button className="btn btn-primary" onClick={handleResume} disabled={loading}>
-                엔진 재개
-              </button>
-            )}
-          </div>
+          {auth.isAdmin && (
+            <div style={{ display: "flex", gap: 12 }}>
+              {status === "running" ? (
+                <button className="btn btn-ghost" onClick={handlePause} disabled={loading}>
+                  엔진 일시정지
+                </button>
+              ) : (
+                <button className="btn btn-primary" onClick={handleResume} disabled={loading}>
+                  엔진 재개
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -158,8 +166,9 @@ export default function System() {
         </div>
         <div className="panel-body">
           <p style={{ color: "var(--text-dim)", lineHeight: 1.6, margin: "0 0 16px", fontSize: 13 }}>
-            잔고와 거래내역이 모두 초기화됩니다. 보유 포지션이 전부 삭제됩니다.
-            학습된 모델과 캔들 데이터는 유지됩니다.
+            {auth.isAdmin
+              ? "잔고와 거래내역이 모두 초기화됩니다. 보유 포지션이 전부 삭제됩니다. 학습된 모델과 캔들 데이터는 유지됩니다."
+              : "내 잔고와 거래내역이 초기화됩니다. 보유 포지션이 전부 삭제됩니다."}
           </p>
           <button className="btn btn-danger" onClick={() => setShowReset(true)} disabled={loading}>
             초기화 실행
@@ -167,27 +176,29 @@ export default function System() {
         </div>
       </div>
 
-      {/* ── System Info ────────────────── */}
-      <div className="panel">
-        <div className="panel-header">
-          <h3>시스템 정보</h3>
-        </div>
-        <div className="panel-body">
-          {config && INFO_FIELDS.map(({ section, label, fields }) => (
-            <div key={section} style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--accent)", marginBottom: 8 }}>
-                {label}
-              </div>
-              {fields.map(({ key, label: fieldLabel }) => (
-                <div key={key} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(31, 45, 64, 0.4)", fontFamily: "var(--font-mono)", fontSize: 13 }}>
-                  <span style={{ color: "var(--text-dim)" }}>{fieldLabel}</span>
-                  <span style={{ color: "var(--text)" }}>{String((config[section] as Record<string, unknown>)[key])}</span>
+      {/* ── System Info (admin only) ────── */}
+      {auth.isAdmin && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>시스템 정보</h3>
+          </div>
+          <div className="panel-body">
+            {config && INFO_FIELDS.map(({ section, label, fields }) => (
+              <div key={section} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--accent)", marginBottom: 8 }}>
+                  {label}
                 </div>
-              ))}
-            </div>
-          ))}
+                {fields.map(({ key, label: fieldLabel }) => (
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(31, 45, 64, 0.4)", fontFamily: "var(--font-mono)", fontSize: 13 }}>
+                    <span style={{ color: "var(--text-dim)" }}>{fieldLabel}</span>
+                    <span style={{ color: "var(--text)" }}>{String((config[section] as Record<string, unknown>)[key])}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── About ──────────────────────── */}
       <div className="panel">
@@ -201,7 +212,7 @@ export default function System() {
         </div>
       </div>
 
-      {/* ── Reset Modal ────────────────── */}
+      {/* ── Reset Modal ──────────────────── */}
       {showReset && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setShowReset(false)}>
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 32, maxWidth: 420, width: "90%" }} onClick={(e) => e.stopPropagation()}>
