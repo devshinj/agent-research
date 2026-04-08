@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from src.types.models import PendingOrder
 from src.ui.api.auth import get_current_user
 
 router = APIRouter()
@@ -27,6 +31,12 @@ class ModeRequest(BaseModel):
 class ExitOrdersRequest(BaseModel):
     stop_loss_price: str | None = None
     take_profit_price: str | None = None
+
+
+class LimitBuyRequest(BaseModel):
+    market: str
+    limit_price: str
+    amount_krw: str
 
 
 @router.get("/markets")
@@ -256,13 +266,145 @@ async def max_buy_amount(
 ) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
-        return {"amount": "0"}
+        return {"amount": "0", "cash_balance": "0", "fee_rate": "0", "slippage_rate": "0"}
     user_id = user["id"]
     account = app.user_accounts.get(user_id)
     if account is None:
-        return {"amount": "0"}
+        return {"amount": "0", "cash_balance": "0", "fee_rate": "0", "slippage_rate": "0"}
     safe = app.paper_engine.safe_buy_amount(account.cash_balance)
-    return {"amount": str(safe)}
+    pt = app.settings.paper_trading
+    return {
+        "amount": str(safe),
+        "cash_balance": str(account.cash_balance),
+        "fee_rate": str(pt.fee_rate),
+        "slippage_rate": str(pt.slippage_rate),
+    }
+
+
+def _end_of_day_kst() -> int:
+    """Return Unix timestamp for 23:59:59 KST today."""
+    kst = timezone(timedelta(hours=9))
+    now_kst = datetime.now(kst)
+    eod = now_kst.replace(hour=23, minute=59, second=59, microsecond=0)
+    return int(eod.timestamp())
+
+
+@router.post("/limit-buy")
+async def create_limit_buy(
+    request: Request, body: LimitBuyRequest, user: dict = Depends(get_current_user),
+) -> dict:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"success": False, "error": "App not running"}
+
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"success": False, "error": "User account not found"}
+
+    amount = Decimal(body.amount_krw)
+    limit_price = Decimal(body.limit_price)
+
+    if limit_price <= 0:
+        return {"success": False, "error": "지정가는 0보다 커야 합니다"}
+
+    if amount < app.settings.paper_trading.min_order_krw:
+        return {"success": False, "error": f"최소 주문 금액({app.settings.paper_trading.min_order_krw}원) 미달"}
+
+    safe_max = app.paper_engine.safe_buy_amount(account.cash_balance)
+    if amount > safe_max:
+        return {"success": False, "error": f"잔고 부족 (수수료 포함 최대 {safe_max:,.0f}원)"}
+
+    existing = account.positions.get(body.market)
+    if existing is None and len(account.positions) >= app.settings.paper_trading.max_open_positions:
+        return {"success": False, "error": "포지션 한도 도달"}
+
+    now = int(time.time())
+    pending_order = PendingOrder(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        market=body.market,
+        side="BUY",
+        limit_price=limit_price,
+        amount_krw=amount,
+        status="PENDING",
+        created_at=now,
+        expires_at=_end_of_day_kst(),
+    )
+
+    await app.pending_order_repo.create(pending_order, account)
+    await app._save_user_state(user_id)
+    app._push_ws_message(user_id, {
+        "type": "pending_order_placed",
+        "data": {
+            "order_id": pending_order.id,
+            "market": pending_order.market,
+            "limit_price": str(pending_order.limit_price),
+            "amount_krw": str(pending_order.amount_krw),
+        },
+    })
+
+    return {
+        "success": True,
+        "pending_order": {
+            "id": pending_order.id,
+            "market": pending_order.market,
+            "limit_price": str(pending_order.limit_price),
+            "amount_krw": str(pending_order.amount_krw),
+            "status": pending_order.status,
+            "created_at": pending_order.created_at,
+            "expires_at": pending_order.expires_at,
+        },
+    }
+
+
+@router.delete("/limit-buy/{order_id}")
+async def cancel_limit_buy(
+    request: Request, order_id: str, user: dict = Depends(get_current_user),
+) -> dict:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"success": False, "error": "App not running"}
+
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"success": False, "error": "User account not found"}
+
+    result = await app.pending_order_repo.cancel(order_id, account, user_id)
+    if not result:
+        return {"success": False, "error": "주문을 찾을 수 없거나 이미 처리되었습니다"}
+
+    await app._save_user_state(user_id)
+    app._push_ws_message(user_id, {
+        "type": "pending_order_cancelled",
+        "data": {"order_id": order_id},
+    })
+    return {"success": True}
+
+
+@router.get("/pending-orders")
+async def get_pending_orders(
+    request: Request, user: dict = Depends(get_current_user),
+) -> list[dict]:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return []
+
+    user_id = user["id"]
+    orders = await app.pending_order_repo.get_pending_by_user(user_id)
+    return [
+        {
+            "id": o.id,
+            "market": o.market,
+            "limit_price": str(o.limit_price),
+            "amount_krw": str(o.amount_krw),
+            "status": o.status,
+            "created_at": o.created_at,
+            "expires_at": o.expires_at,
+        }
+        for o in orders
+    ]
 
 
 def _serialize_position(pos) -> dict:  # type: ignore[type-arg]
