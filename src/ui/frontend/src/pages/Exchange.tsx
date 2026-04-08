@@ -8,6 +8,7 @@ import {
   type CandlestickData,
   type HistogramData,
 } from "lightweight-charts";
+import Markdown from "react-markdown";
 import { useAuthContext } from "../context/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
 
@@ -847,9 +848,15 @@ function AgentChat({ market, accessToken }: { market: string; accessToken: strin
               {messages.map((msg, i) => (
                 <div key={i} className={`agent-msg agent-msg-${msg.role}`}>
                   <div className="agent-msg-content">
-                    {msg.content}
-                    {msg.role === "assistant" && isStreaming && i === messages.length - 1 && (
-                      <span className="streaming-cursor" />
+                    {msg.role === "assistant" ? (
+                      <>
+                        <Markdown>{msg.content}</Markdown>
+                        {isStreaming && i === messages.length - 1 && (
+                          <span className="streaming-cursor" />
+                        )}
+                      </>
+                    ) : (
+                      msg.content
                     )}
                   </div>
                   {msg.sources && msg.sources.length > 0 && (

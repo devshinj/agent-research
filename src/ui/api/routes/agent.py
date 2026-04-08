@@ -99,11 +99,18 @@ def _build_system_prompt(request: Request, market: str, user_id: int) -> str:
                 lines.append(f"- 투자금액: ₩{float(pos.total_invested):,.0f}")
 
     lines.append("")
-    lines.append("역할:")
+    lines.append("역할 및 응답 규칙:")
     lines.append("- Google 검색을 활용하여 최신 뉴스, 커뮤니티 동향, 시장 분석을 참고하세요")
-    lines.append("- 상승세/하락세 판단, 매수/매도/관망 추천을 근거와 함께 제시하세요")
-    lines.append("- 투자 조언이 아닌 정보 제공임을 명시하세요")
     lines.append("- 한국어로 응답하세요")
+    lines.append("- 투자 조언이 아닌 정보 제공임을 한 줄로 명시하세요")
+    lines.append("")
+    lines.append("응답 형식 (반드시 아래 순서와 형식을 따르세요):")
+    lines.append("1. 첫 줄에 매매 추천을 한 줄로: `**추천: 매수 / 매도 / 관망**` (이유 한 줄 포함)")
+    lines.append("2. `## 시장 동향` — 현재 가격 흐름과 추세를 2~3문장으로")
+    lines.append("3. `## 주요 뉴스` — 최근 관련 뉴스 핵심 2~3개를 글머리 기호로")
+    lines.append("4. `## 커뮤니티 여론` — 투자자 심리를 1~2문장으로")
+    lines.append("")
+    lines.append("전체 응답은 200자 이내로 간결하게 작성하세요. 긴 설명은 금지합니다.")
 
     return "\n".join(lines)
 

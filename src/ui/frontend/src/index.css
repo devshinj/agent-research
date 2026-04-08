@@ -2105,3 +2105,52 @@ input[type="range"]::-moz-range-thumb {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* Agent markdown rendering */
+.agent-msg-assistant .agent-msg-content h2 {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 12px 0 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-msg-assistant .agent-msg-content h3 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 10px 0 4px;
+}
+
+.agent-msg-assistant .agent-msg-content p {
+  margin: 4px 0;
+}
+
+.agent-msg-assistant .agent-msg-content p:first-child {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.agent-msg-assistant .agent-msg-content ul {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.agent-msg-assistant .agent-msg-content li {
+  margin: 2px 0;
+  font-size: 0.83rem;
+}
+
+.agent-msg-assistant .agent-msg-content strong {
+  color: var(--text);
+}
+
+.agent-msg-assistant .agent-msg-content code {
+  background: var(--bg-raised);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
