@@ -18,6 +18,8 @@ dependencies = [
     "joblib>=1.4",
     "aiosqlite>=0.21",
     "pyyaml>=6.0",
+    "bcrypt>=4.2",
+    "PyJWT>=2.9",
 ]
 
 [project.optional-dependencies]
