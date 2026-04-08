@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+
+from src.ui.api.auth import get_current_user
 
 router = APIRouter()
 
 
 @router.get("/markets")
-async def get_markets(request: Request) -> list[dict[str, str]]:
+async def get_markets(
+    request: Request, user: dict = Depends(get_current_user)
+) -> list[dict[str, str]]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
@@ -19,7 +23,11 @@ async def get_markets(request: Request) -> list[dict[str, str]]:
 
 @router.get("/candles")
 async def get_candles(
-    request: Request, market: str, limit: int = 200, timeframe: str | None = None,
+    request: Request,
+    market: str,
+    limit: int = 200,
+    timeframe: str | None = None,
+    user: dict = Depends(get_current_user),
 ) -> list[dict]:
     app = getattr(request.app.state, "app", None)
     if app is None:
@@ -48,7 +56,9 @@ async def get_candles(
 
 
 @router.get("/summary")
-async def get_summary(request: Request) -> dict:
+async def get_summary(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {
@@ -61,7 +71,19 @@ async def get_summary(request: Request) -> dict:
             "initial_balance": "10000000",
         }
 
-    account = app.account
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {
+            "total_equity": "10000000",
+            "cash_balance": "10000000",
+            "daily_pnl": "0",
+            "total_pnl": "0",
+            "total_return_pct": "0",
+            "open_positions": 0,
+            "initial_balance": "10000000",
+        }
+
     # Get current prices for equity calculation
     current_prices: dict = {}
     if account.positions:
@@ -88,6 +110,9 @@ async def get_summary(request: Request) -> dict:
 
     initial_int = account.initial_balance.to_integral_value(rounding=ROUND_DOWN)
 
+    settings = await app.user_repo.get_settings(user_id)
+    trading_enabled = bool(settings.get("trading_enabled", 0))
+
     return {
         "total_equity": str(total_equity_int),
         "cash_balance": str(cash_int),
@@ -96,5 +121,5 @@ async def get_summary(request: Request) -> dict:
         "total_return_pct": str(total_return_pct),
         "open_positions": len(account.positions),
         "initial_balance": str(initial_int),
-        "trading_enabled": app.trading_enabled,
+        "trading_enabled": trading_enabled,
     }

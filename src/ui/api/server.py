@@ -2,23 +2,31 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.ui.api.auth import decode_token
 from src.ui.api.routes import control, dashboard, exchange, portfolio, risk, strategy
+from src.ui.api.routes import auth as auth_router
+from src.ui.api.routes import admin as admin_router
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Crypto Paper Trader", version="0.1.0")
 
+    origins = os.environ.get("CORS_ORIGINS", "*").split(",")
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    app.include_router(auth_router.router)
+    app.include_router(admin_router.router)
     app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
     app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
     app.include_router(strategy.router, prefix="/api/strategy", tags=["strategy"])
@@ -32,6 +40,18 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/live")
     async def websocket_live(ws: WebSocket) -> None:
+        token = ws.query_params.get("token")
+        if not token:
+            await ws.close(code=4001, reason="Missing token")
+            return
+        try:
+            payload = decode_token(token)
+            if payload.get("type") != "access":
+                raise ValueError("Invalid token type")
+        except ValueError:
+            await ws.close(code=4001, reason="Invalid token")
+            return
+        user_id = payload["sub"]
         await ws.accept()
         try:
             prev_snapshot: dict[str, dict] = {}

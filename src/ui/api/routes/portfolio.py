@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from decimal import ROUND_DOWN, Decimal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+
+from src.ui.api.auth import get_current_user
 
 router = APIRouter()
 
@@ -12,13 +14,19 @@ def _truncate_krw(value: Decimal) -> Decimal:
 
 
 @router.get("/positions")
-async def get_positions(request: Request) -> list:
+async def get_positions(
+    request: Request, user: dict = Depends(get_current_user)
+) -> list:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
 
+    user_id = user["id"]
     korean_names: dict[str, str] = app.collector.korean_names
-    account = app.account
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return []
+
     current_prices: dict = {}
     if account.positions:
         tickers = await app.upbit.fetch_tickers(list(account.positions.keys()))
@@ -58,13 +66,19 @@ async def get_positions(request: Request) -> list:
 
 
 @router.get("/history")
-async def get_history(request: Request, page: int = 1, size: int = 20) -> dict:
+async def get_history(
+    request: Request,
+    page: int = 1,
+    size: int = 20,
+    user: dict = Depends(get_current_user),
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"items": [], "page": page, "size": size, "total": 0}
 
+    user_id = user["id"]
     korean_names: dict[str, str] = app.collector.korean_names
-    orders = await app.order_repo.get_recent(limit=size * page)
+    orders = await app.order_repo.get_recent(user_id, limit=size * page)
     start = (page - 1) * size
     page_orders = orders[start:start + size]
 
@@ -91,10 +105,16 @@ async def get_history(request: Request, page: int = 1, size: int = 20) -> dict:
 
 
 @router.get("/daily")
-async def get_daily(request: Request, period: str = "24h") -> list:
+async def get_daily(
+    request: Request,
+    period: str = "24h",
+    user: dict = Depends(get_current_user),
+) -> list:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
+
+    user_id = user["id"]
 
     from datetime import date, timedelta
 
@@ -109,7 +129,7 @@ async def get_daily(request: Request, period: str = "24h") -> list:
         start = today - timedelta(days=1)
 
     summaries = await app.portfolio_repo.get_daily_summaries(
-        start.isoformat(), today.isoformat()
+        start.isoformat(), today.isoformat(), user_id
     )
     return [
         {
