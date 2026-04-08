@@ -15,11 +15,16 @@ from src.ui.api.auth import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+@router.get("/info")
+async def auth_info():
+    return {"invite_required": bool(INVITE_CODE)}
+
+
 class RegisterRequest(BaseModel):
     email: str
     password: str
     nickname: str
-    invite_code: str
+    invite_code: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -33,7 +38,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/register")
 async def register(body: RegisterRequest, request: Request):
-    if not INVITE_CODE or body.invite_code != INVITE_CODE:
+    if INVITE_CODE and body.invite_code != INVITE_CODE:
         raise HTTPException(status_code=400, detail="Invalid invite code")
 
     if len(body.password) < 8:

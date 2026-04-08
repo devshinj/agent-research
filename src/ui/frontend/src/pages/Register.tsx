@@ -1,5 +1,7 @@
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 interface Props {
   onRegister: (
@@ -15,6 +17,14 @@ export default function Register({ onRegister }: Props) {
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [inviteRequired, setInviteRequired] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/auth/info`)
+      .then(r => r.json())
+      .then(data => setInviteRequired(data.invite_required))
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -53,10 +63,12 @@ export default function Register({ onRegister }: Props) {
             <label>비밀번호</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
           </div>
-          <div className="form-group">
-            <label>초대 코드</label>
-            <input type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)} required />
-          </div>
+          {inviteRequired && (
+            <div className="form-group">
+              <label>초대 코드</label>
+              <input type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)} required />
+            </div>
+          )}
           <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
             {loading ? "가입 중..." : "가입하기"}
           </button>
