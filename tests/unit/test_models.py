@@ -22,6 +22,7 @@ def test_order_status_values() -> None:
 
 def test_order_type_values() -> None:
     assert OrderType.MARKET.value == "MARKET"
+    assert OrderType.LIMIT.value == "LIMIT"
 
 
 def test_ws_message_type_values() -> None:
@@ -29,7 +30,7 @@ def test_ws_message_type_values() -> None:
     assert WSMessageType.TRADE_EXECUTED.value == "trade_executed"
 
 
-from src.types.models import Candle, Order, PaperAccount, Position, Signal, DailySummary
+from src.types.models import Candle, Order, PaperAccount, PendingOrder, Position, Signal, DailySummary
 
 
 def test_candle_creation() -> None:
@@ -112,3 +113,19 @@ def test_daily_summary_creation() -> None:
         max_drawdown_pct=Decimal("0.015"),
     )
     assert ds.win_trades == 8
+
+
+def test_pending_order_dataclass() -> None:
+    po = PendingOrder(
+        id="test-uuid",
+        user_id=1,
+        market="KRW-BTC",
+        side="BUY",
+        limit_price=Decimal("50000000"),
+        amount_krw=Decimal("100000"),
+        status="PENDING",
+        created_at=1700000000,
+        expires_at=1700086399,
+    )
+    assert po.filled_at is None
+    assert po.status == "PENDING"

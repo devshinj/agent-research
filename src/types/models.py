@@ -101,10 +101,25 @@ class RankingEntry:
     user_id: int
     nickname: str
     return_pct: Decimal
-    total_pnl: Decimal
+    realized_pnl: Decimal
     initial_balance: Decimal
+    total_equity: Decimal
     win_rate: Decimal
     total_trades: int
     max_drawdown_pct: Decimal
     daily_equities: tuple[Decimal, ...]
     is_me: bool
+
+
+@dataclass
+class PendingOrder:
+    id: str
+    user_id: int
+    market: str
+    side: str
+    limit_price: Decimal
+    amount_krw: Decimal
+    status: str
+    created_at: int
+    expires_at: int
+    filled_at: int | None = None

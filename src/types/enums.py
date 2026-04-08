@@ -20,6 +20,7 @@ class OrderStatus(Enum):
 
 class OrderType(Enum):
     MARKET = "MARKET"
+    LIMIT = "LIMIT"
 
 
 class WSMessageType(Enum):
