@@ -214,6 +214,19 @@ def test_hot_reload_updates_paper_trading():
     assert "max_open_positions" in updated["paper_trading"]
 
 
+def test_hot_reload_updates_threshold_pct():
+    """hot_reload with strategy.threshold_pct updates trainer threshold."""
+    from src.runtime.app import App
+
+    settings = _make_settings()
+    app = App(settings)
+
+    app.hot_reload({"strategy": {"threshold_pct": 0.5}})
+
+    assert app.trainer._threshold == 0.5
+    assert app.settings.strategy.threshold_pct == Decimal("0.5")
+
+
 def test_hot_reload_rejects_forbidden_paper_trading_field():
     """hot_reload raises ValueError for non-allowed paper_trading fields."""
     from src.runtime.app import App

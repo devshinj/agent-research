@@ -47,7 +47,7 @@ class App:
             "max_daily_trades", "consecutive_loss_limit", "cooldown_minutes",
             "partial_take_profit_pct", "partial_sell_fraction",
         },
-        "strategy": {"min_confidence"},
+        "strategy": {"min_confidence", "threshold_pct"},
         "screening": {
             "min_volume_krw", "min_volatility_pct", "max_volatility_pct",
             "max_coins", "always_include",
@@ -441,6 +441,14 @@ class App:
             self.portfolio_manager._risk = new_risk
         if "strategy" in patches:
             self.predictor.update_min_confidence(float(new_strategy.min_confidence))
+            if "threshold_pct" in patches["strategy"]:
+                self.trainer.update_threshold(float(new_strategy.threshold_pct))
+                coro = self._retrain()
+                try:
+                    asyncio.create_task(coro)
+                except RuntimeError:
+                    coro.close()
+                    logger.info("No running event loop; skipping auto-retrain")
         if "screening" in patches:
             self.screener.update_config(new_screening)
         if "paper_trading" in patches:
