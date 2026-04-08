@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING
 
-from src.repository.database import Database
+if TYPE_CHECKING:
+    from src.repository.database import Database
+
 from src.types.models import RankingEntry
 
 
@@ -43,10 +46,7 @@ class RankingRepo:
                 (uid,),
             )
             latest = await cursor.fetchone()
-            if latest:
-                total_equity = Decimal(latest[0])
-            else:
-                total_equity = cash_balance
+            total_equity = Decimal(latest[0]) if latest else cash_balance
 
             # Return percentage
             if initial_balance > 0:
