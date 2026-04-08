@@ -43,6 +43,7 @@ class Screener:
             candidates.append(ScreeningResult(
                 market=market,
                 korean_name=names.get(market, market.replace("KRW-", "")),
+                price=t["price"],
                 volume_krw=volume_24h,
                 volatility=change_rate,
                 score=score,

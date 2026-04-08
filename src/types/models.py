@@ -76,6 +76,7 @@ class SignalBasis:
 class ScreeningResult:
     market: str
     korean_name: str
+    price: Decimal
     volume_krw: Decimal
     volatility: Decimal
     score: Decimal

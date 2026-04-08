@@ -762,7 +762,7 @@ function ExchangeDetail({
         if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
         const candleData: CandlestickData[] = candles.map((c) => ({
-          time: (c.timestamp / 1000 + 32400) as unknown as CandlestickData["time"],
+          time: (c.timestamp + 32400) as unknown as CandlestickData["time"],
           open: Number(c.open),
           high: Number(c.high),
           low: Number(c.low),
@@ -770,7 +770,7 @@ function ExchangeDetail({
         }));
 
         const volumeData: HistogramData[] = candles.map((c) => ({
-          time: (c.timestamp / 1000 + 32400) as unknown as HistogramData["time"],
+          time: (c.timestamp + 32400) as unknown as HistogramData["time"],
           value: Number(c.volume),
           color:
             Number(c.close) >= Number(c.open)
@@ -782,7 +782,7 @@ function ExchangeDetail({
         volumeSeriesRef.current.setData(volumeData);
 
         if (candles.length > 0) {
-          lastCandleTimeRef.current = candles[candles.length - 1].timestamp / 1000 + 32400;
+          lastCandleTimeRef.current = candles[candles.length - 1].timestamp + 32400;
         }
 
         chartRef.current?.timeScale().fitContent();
@@ -833,6 +833,8 @@ function ExchangeDetail({
     const now = Math.floor(t.timestamp);
     const kstNow = now + 32400;
     const candleTime = Math.floor(kstNow / tfSeconds) * tfSeconds;
+
+    if (candleTime < lastCandleTimeRef.current) return;
 
     candleSeriesRef.current.update({
       time: candleTime as unknown as CandlestickData["time"],

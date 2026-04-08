@@ -25,6 +25,7 @@ async def get_screening(request: Request) -> list[dict[str, Any]]:
         {
             "market": r.market,
             "korean_name": r.korean_name,
+            "price": str(r.price),
             "volume_krw": str(r.volume_krw),
             "volatility_pct": str(r.volatility),
             "score": float(r.score),

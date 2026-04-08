@@ -1005,7 +1005,7 @@ input[type="range"]::-moz-range-thumb {
 /* ── Exchange Page ── */
 .exchange-layout {
   display: grid;
-  grid-template-columns: 460px 1fr;
+  grid-template-columns: 490px 1fr;
   gap: 16px;
   height: calc(100vh - 40px);
 }
@@ -1145,7 +1145,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .market-row.holding {
-  border-right: 3px solid var(--accent);
+  border-left: 3px solid var(--accent);
 }
 
 .holding-dot {

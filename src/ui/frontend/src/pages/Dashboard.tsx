@@ -261,7 +261,7 @@ export default function Dashboard() {
       `/api/dashboard/candles?market=${expandedMarket}&limit=100`
     ).then((candles) => {
       const candleData: CandlestickData[] = candles.map((c) => ({
-        time: (Number(c.timestamp) / 1000 + 32400) as unknown as CandlestickData["time"],
+        time: (Number(c.timestamp) + 32400) as unknown as CandlestickData["time"],
         open: Number(c.open),
         high: Number(c.high),
         low: Number(c.low),
@@ -269,7 +269,7 @@ export default function Dashboard() {
       }));
 
       const volumeData: HistogramData[] = candles.map((c) => ({
-        time: (Number(c.timestamp) / 1000 + 32400) as unknown as HistogramData["time"],
+        time: (Number(c.timestamp) + 32400) as unknown as HistogramData["time"],
         value: Number(c.volume),
         color:
           Number(c.close) >= Number(c.open)

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useApi } from "../hooks/useApi";
 
-const REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_INTERVAL_MS = 15_000;
 
 interface ScreeningResult {
   market: string;
   korean_name: string;
+  price: string;
   volume_krw: string;
   volatility_pct: string;
   score: number;
@@ -98,7 +99,7 @@ const STRATEGY_FIELDS: SettingFieldDef[] = [
   { section: "entry_analyzer", key: "price_lookback_candles", label: "가격 참조 캔들", desc: "현재 가격의 상대적 위치를 판단할 때 참조하는 최근 캔들 수입니다", min: 20, max: 200, step: 10, format: (v) => `${v}개`, hotReload: false },
 ];
 
-type SortKey = "volume_krw" | "volatility_pct" | "score";
+type SortKey = "price" | "volume_krw" | "volatility_pct" | "score";
 type SortDir = "asc" | "desc";
 
 export default function Strategy() {
@@ -244,6 +245,7 @@ export default function Strategy() {
             <thead>
               <tr>
                 <th>코인</th>
+                <th style={{ cursor: "pointer" }} onClick={() => toggleSort("price")}>현재가{sortIndicator("price")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("volume_krw")}>거래량 (KRW){sortIndicator("volume_krw")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("volatility_pct")}>변동성{sortIndicator("volatility_pct")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => toggleSort("score")}>점수{sortIndicator("score")}</th>
@@ -255,6 +257,7 @@ export default function Strategy() {
                   <td style={{ color: "var(--text)", fontWeight: 600 }}>
                     {s.korean_name} <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: 12.5, marginLeft: 6 }}>({s.market.replace("KRW-", "")})</span>
                   </td>
+                  <td>{`\u20A9${Number(s.price).toLocaleString("ko-KR")}`}</td>
                   <td>{`\u20A9${Math.floor(Number(s.volume_krw)).toLocaleString("ko-KR")}`}</td>
                   <td>{Number(s.volatility_pct).toFixed(2)}%</td>
                   <td>
@@ -359,6 +362,44 @@ export default function Strategy() {
         </div>,
         document.body,
       )}
+
+      {/* ── Strategy Settings ───────────── */}
+      <div className="panel">
+        <div className="panel-header">
+          <h3>전략 설정</h3>
+          {settingsFeedback && (
+            <span className={`badge ${settingsFeedback === "적용 완료" ? "profit" : settingsFeedback === "적용 실패" ? "loss" : "neutral"}`}>
+              {settingsFeedback}
+            </span>
+          )}
+        </div>
+        <div className="panel-body">
+          {STRATEGY_FIELDS.map(({ section, key, label, desc, min, max, step, format, hotReload }) => (
+            <div key={`${section}.${key}`} className="slider-row">
+              <span className="slider-label" data-tooltip={desc}>
+                {label}
+                {!hotReload && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>(초기화 필요)</span>}
+              </span>
+              <div className="slider-track">
+                <input
+                  type="range" min={min} max={max} step={step}
+                  value={form[section]?.[key] ?? min}
+                  onChange={(e) => handleSlider(section, key, Number(e.target.value))}
+                  disabled={!hotReload}
+                  style={{ opacity: hotReload ? 1 : 0.4 }}
+                />
+              </div>
+              <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
+            </div>
+          ))}
+          <div className="slider-buttons">
+            <button className="btn" onClick={handleSettingsReset} disabled={saving || !hasSettingsChanges()}>초기화</button>
+            <button className="btn btn-primary" onClick={handleSettingsApply} disabled={saving || !hasSettingsChanges()}>
+              {saving ? "적용 중..." : "적용"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* ── Model Status ───────────────────── */}
       <div className="panel">
@@ -479,43 +520,7 @@ export default function Strategy() {
         </div>
       </div>
 
-      {/* ── Strategy Settings ───────────── */}
-      <div className="panel">
-        <div className="panel-header">
-          <h3>전략 설정</h3>
-          {settingsFeedback && (
-            <span className={`badge ${settingsFeedback === "적용 완료" ? "profit" : settingsFeedback === "적용 실패" ? "loss" : "neutral"}`}>
-              {settingsFeedback}
-            </span>
-          )}
-        </div>
-        <div className="panel-body">
-          {STRATEGY_FIELDS.map(({ section, key, label, desc, min, max, step, format, hotReload }) => (
-            <div key={`${section}.${key}`} className="slider-row">
-              <span className="slider-label" data-tooltip={desc}>
-                {label}
-                {!hotReload && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>(초기화 필요)</span>}
-              </span>
-              <div className="slider-track">
-                <input
-                  type="range" min={min} max={max} step={step}
-                  value={form[section]?.[key] ?? min}
-                  onChange={(e) => handleSlider(section, key, Number(e.target.value))}
-                  disabled={!hotReload}
-                  style={{ opacity: hotReload ? 1 : 0.4 }}
-                />
-              </div>
-              <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
-            </div>
-          ))}
-          <div className="slider-buttons">
-            <button className="btn" onClick={handleSettingsReset} disabled={saving || !hasSettingsChanges()}>초기화</button>
-            <button className="btn btn-primary" onClick={handleSettingsApply} disabled={saving || !hasSettingsChanges()}>
-              {saving ? "적용 중..." : "적용"}
-            </button>
-          </div>
-        </div>
-      </div>
+      
     </div>
   );
 }
