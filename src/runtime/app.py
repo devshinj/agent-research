@@ -80,6 +80,9 @@ class App:
         self.collector = Collector(
             self.upbit, self.candle_repo,
             settings.collector.candle_timeframe, settings.collector.max_candles_per_market,
+            train_timeframe=settings.collector.train_timeframe,
+            train_candles=settings.collector.train_candles,
+            daily_candles=settings.collector.daily_candles,
         )
         self.screener = Screener(settings.screening)
         self.feature_builder = FeatureBuilder()
@@ -203,6 +206,8 @@ class App:
         if self.screened_markets:
             logger.info("Seeding candle history for %d screened markets...", len(self.screened_markets))
             await self.collector.collect_candles(self.screened_markets)
+            logger.info("Seeding training data (15m + daily) for %d markets...", len(self.screened_markets))
+            await self.collector.collect_train_candles(self.screened_markets)
         await self._train_missing_models()
 
         # Schedule periodic tasks
@@ -225,6 +230,10 @@ class App:
         self.scheduler.schedule_interval(
             "retrain_models", self._retrain,
             interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
+        )
+        self.scheduler.schedule_interval(
+            "collect_train_data", self._collect_train_data,
+            interval_seconds=900,  # 15분마다
         )
         self.scheduler.schedule_interval(
             "cleanup_stale_data", self._cleanup_stale_data,
@@ -265,26 +274,37 @@ class App:
 
     async def _train_missing_models(self) -> None:
         """Train models for screened markets that don't have a loaded model."""
-        timeframe = f"{self.settings.collector.candle_timeframe}m"
-        pending: dict[str, pd.DataFrame] = {}
+        train_tf = f"{self.settings.collector.train_timeframe}m"
+        pending: dict[str, tuple[pd.DataFrame, pd.DataFrame | None]] = {}
 
         async with self._db_lock:
             for market in self.screened_markets:
                 if market in self.predictor._models:
                     continue
-                candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
+                candles = await self.candle_repo.get_latest(
+                    market, train_tf, self.settings.collector.train_candles,
+                )
                 if len(candles) < 200:
-                    logger.info("Not enough candles for %s: %d", market, len(candles))
+                    logger.info("Not enough %s candles for %s: %d", train_tf, market, len(candles))
                     continue
-                pending[market] = self._candles_to_df(candles)
+                df = self._candles_to_df(candles)
 
-        for market, df in pending.items():
+                daily_candles = await self.candle_repo.get_latest(
+                    market, "1D", self.settings.collector.daily_candles,
+                )
+                daily_df = self._candles_to_df(daily_candles) if len(daily_candles) >= 20 else None
+                pending[market] = (df, daily_df)
+
+        for market, (df, daily_df) in pending.items():
             self.training_in_progress[market] = time.time()
             try:
-                result = self.trainer.train(market, df)
+                result = self.trainer.train(market, df, daily_df=daily_df)
                 if result["model_path"] is not None:
                     self.predictor.load_model(market, result["model_path"])
-                    logger.info("Trained and loaded model for %s (accuracy: %.3f)", market, result["accuracy"])
+                    logger.info(
+                        "Trained and loaded model for %s (f1: %.3f, accuracy: %.3f)",
+                        market, result["f1"], result["accuracy"],
+                    )
                 else:
                     logger.info("Training skipped for %s: insufficient valid samples", market)
             finally:
@@ -296,20 +316,27 @@ class App:
             return
 
         logger.info("Starting periodic retrain for %d markets", len(self.screened_markets))
-        timeframe = f"{self.settings.collector.candle_timeframe}m"
+        train_tf = f"{self.settings.collector.train_timeframe}m"
         trained = 0
         total = 0
 
         for market in list(self.screened_markets):
             async with self._db_lock:
-                candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
+                candles = await self.candle_repo.get_latest(
+                    market, train_tf, self.settings.collector.train_candles,
+                )
+                daily_candles = await self.candle_repo.get_latest(
+                    market, "1D", self.settings.collector.daily_candles,
+                )
             if len(candles) < 200:
                 continue
             total += 1
             df = self._candles_to_df(candles)
+            daily_df = self._candles_to_df(daily_candles) if len(daily_candles) >= 20 else None
+
             self.training_in_progress[market] = time.time()
             try:
-                result = self.trainer.train(market, df)
+                result = self.trainer.train(market, df, daily_df=daily_df)
                 if result["model_path"] is not None:
                     self.predictor.load_model(market, result["model_path"])
                     trained += 1
@@ -525,8 +552,14 @@ class App:
 
                 df = self._candles_to_df(candles)
 
+                # 일봉 context 조회
+                daily_candles = await self.candle_repo.get_latest(
+                    market, "1D", self.settings.collector.daily_candles,
+                )
+                daily_df = self._candles_to_df(daily_candles) if len(daily_candles) >= 20 else None
+
                 try:
-                    signal, basis = self.predictor.predict(market, df)
+                    signal, basis = self.predictor.predict(market, df, daily_df=daily_df)
                     basis_json: str | None = None
                     if basis.top_features:
                         basis_json = json.dumps([
@@ -542,6 +575,13 @@ class App:
                     ))
                 except KeyError:
                     logger.warning("%s: no trained model loaded — skipping prediction", market)
+
+    async def _collect_train_data(self) -> None:
+        """15분봉 + 일봉 수집 (학습 데이터용)."""
+        if not self.screened_markets:
+            return
+        async with self._db_lock:
+            await self.collector.collect_train_candles(self.screened_markets)
 
     async def _on_signal(self, event: SignalEvent) -> None:
         if self.paused:
