@@ -112,6 +112,16 @@ interface OrderResult {
   position?: PositionInfo | null;
 }
 
+interface PendingOrderItem {
+  id: string;
+  market: string;
+  limit_price: string;
+  amount_krw: string;
+  status: string;
+  created_at: number;
+  expires_at: number;
+}
+
 type Timeframe = 1 | 5 | 15 | 60 | 240;
 type DailyTf = "1D";
 const TIMEFRAMES: { label: string; value: Timeframe | DailyTf }[] = [
@@ -300,6 +310,7 @@ interface ConfirmInfo {
   quantity: string;
   amount: string;
   fraction?: string;
+  isLimit?: boolean;
 }
 
 function OrderConfirmModal({
@@ -324,11 +335,23 @@ function OrderConfirmModal({
             <span className="order-confirm-value">{info.market}</span>
           </div>
           <div className="order-confirm-row">
-            <span className="order-confirm-label">현재가</span>
+            <span className="order-confirm-label">{info.isLimit ? "지정가" : "현재가"}</span>
             <span className="order-confirm-value">₩{formatPrice(info.price)}</span>
           </div>
           {isBuy ? (
             <>
+              {info.isLimit && (
+                <>
+                  <div className="order-confirm-row">
+                    <span className="order-confirm-label">주문 유형</span>
+                    <span className="order-confirm-value" style={{ color: "var(--accent)" }}>지정가</span>
+                  </div>
+                  <div className="order-confirm-row">
+                    <span className="order-confirm-label">만료</span>
+                    <span className="order-confirm-value">오늘 23:59</span>
+                  </div>
+                </>
+              )}
               <div className="order-confirm-row">
                 <span className="order-confirm-label">투자 금액</span>
                 <span className="order-confirm-value">₩{Number(info.amount).toLocaleString("ko-KR")}</span>
@@ -365,7 +388,7 @@ function OrderConfirmModal({
             className={`btn order-confirm-submit ${isBuy ? "btn-accent" : "btn-sell"}`}
             onClick={onConfirm}
           >
-            {isBuy ? "매수 확인" : "매도 확인"}
+            {isBuy ? (info.isLimit ? "지정가 매수 신청" : "매수 확인") : "매도 확인"}
           </button>
         </div>
       </div>
@@ -387,7 +410,7 @@ function OrderPanel({
   cashBalance: string;
 }) {
   const { api } = useAuthContext();
-  const { postJson, patchJson, get } = api;
+  const { postJson, patchJson, get, del } = api;
   const [tab, setTab] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("");
   const [result, setResult] = useState<{ type: "success" | "error"; msg: string } | null>(null);
@@ -398,6 +421,9 @@ function OrderPanel({
   const [feeRate, setFeeRate] = useState<number | null>(null);
   const [slippageRate, setSlippageRate] = useState<number | null>(null);
   const [maxBuyAmount, setMaxBuyAmount] = useState<number | null>(null);
+  const [orderType, setOrderType] = useState<"market" | "limit">("market");
+  const [limitPrice, setLimitPrice] = useState("");
+  const [pendingOrders, setPendingOrders] = useState<PendingOrderItem[]>([]);
 
   // Fetch fee/slippage info
   useEffect(() => {
@@ -521,6 +547,73 @@ function OrderPanel({
     }
   };
 
+  useEffect(() => {
+    if (orderType === "limit" && !limitPrice && Number(price) > 0) {
+      setLimitPrice(price);
+    }
+  }, [price, orderType, limitPrice]);
+
+  const fetchPendingOrders = useCallback(async () => {
+    try {
+      const res = await get<PendingOrderItem[]>("/api/exchange/pending-orders");
+      setPendingOrders(res.filter((o) => o.market === market));
+    } catch { /* ignore */ }
+  }, [get, market]);
+
+  useEffect(() => {
+    fetchPendingOrders();
+  }, [fetchPendingOrders, tradesRefresh]);
+
+  const handleLimitBuy = () => {
+    if (!amount || Number(amount) <= 0 || !limitPrice || Number(limitPrice) <= 0) return;
+    const qty = (Number(amount) / Number(limitPrice)).toFixed(8);
+    setConfirm({
+      side: "buy",
+      market,
+      price: limitPrice,
+      quantity: qty,
+      amount,
+      isLimit: true,
+    });
+  };
+
+  const executeLimitBuy = async () => {
+    if (!amount || !limitPrice) return;
+    setConfirm(null);
+    try {
+      const res = await postJson<{ success: boolean; error?: string; pending_order?: PendingOrderItem }>(
+        "/api/exchange/limit-buy",
+        { market, limit_price: limitPrice, amount_krw: amount },
+      );
+      if (res.success) {
+        showResult("success", `지정가 매수 신청 — ₩${formatPrice(limitPrice)} × ${formatKRW(amount)}`);
+        setAmount("");
+        setLimitPrice("");
+        fetchPendingOrders();
+      } else {
+        showResult("error", res.error ?? "지정가 매수 실패");
+      }
+    } catch {
+      showResult("error", "요청 실패");
+    }
+  };
+
+  const cancelPendingOrder = async (orderId: string) => {
+    try {
+      const res = await del<{ success: boolean; error?: string }>(
+        `/api/exchange/limit-buy/${orderId}`,
+      );
+      if (res.success) {
+        showResult("success", "지정가 주문 취소됨");
+        fetchPendingOrders();
+      } else {
+        showResult("error", res.error ?? "취소 실패");
+      }
+    } catch {
+      showResult("error", "취소 실패");
+    }
+  };
+
   const amountNum = Number(amount);
   const estimatedQty = amountNum > 0 && Number(price) > 0
     ? (amountNum / Number(price)).toFixed(8)
@@ -546,6 +639,20 @@ function OrderPanel({
       <div className="panel-body" style={{ padding: "16px" }}>
         {tab === "buy" ? (
           <div className="order-form">
+            <div className="order-type-toggle">
+              <button
+                className={`order-type-btn${orderType === "market" ? " active" : ""}`}
+                onClick={() => { setOrderType("market"); setLimitPrice(""); }}
+              >
+                시장가
+              </button>
+              <button
+                className={`order-type-btn${orderType === "limit" ? " active" : ""}`}
+                onClick={() => { setOrderType("limit"); setLimitPrice(price); }}
+              >
+                지정가
+              </button>
+            </div>
             <div className="order-info-row">
               <span className="order-label">보유 현금</span>
               <span className="order-value">₩{Number(cashBalance).toLocaleString("ko-KR")}</span>
@@ -554,6 +661,17 @@ function OrderPanel({
               <span className="order-label">현재가</span>
               <span className="order-value">{formatPrice(price)}</span>
             </div>
+            {orderType === "limit" && (
+              <div style={{ marginBottom: 8 }}>
+                <input
+                  className="order-input"
+                  type="number"
+                  placeholder="매수 희망 가격"
+                  value={limitPrice}
+                  onChange={(e) => setLimitPrice(e.target.value)}
+                />
+              </div>
+            )}
             <input
               className="order-input"
               type="number"
@@ -592,8 +710,12 @@ function OrderPanel({
                 잔고가 부족합니다. 수수료·슬리피지 포함 최대 ₩{maxBuyAmount!.toLocaleString("ko-KR")}까지 매수할 수 있습니다.
               </div>
             )}
-            <button className="btn btn-accent order-submit" onClick={handleBuy} disabled={exceedsCash || amountNum <= 0}>
-              매수 주문
+            <button
+              className="btn btn-accent order-submit"
+              onClick={orderType === "market" ? handleBuy : handleLimitBuy}
+              disabled={exceedsCash || amountNum <= 0 || (orderType === "limit" && Number(limitPrice) <= 0)}
+            >
+              {orderType === "market" ? "매수 주문" : "지정가 매수 신청"}
             </button>
           </div>
         ) : (
@@ -661,7 +783,7 @@ function OrderPanel({
             info={confirm}
             onConfirm={() =>
               confirm.side === "buy"
-                ? executeBuy()
+                ? (confirm.isLimit ? executeLimitBuy() : executeBuy())
                 : executeSell(confirm.fraction!)
             }
             onCancel={() => setConfirm(null)}
@@ -671,6 +793,33 @@ function OrderPanel({
         {result && (
           <div className={`order-result ${result.type}`}>
             {result.msg}
+          </div>
+        )}
+
+        {pendingOrders.length > 0 && (
+          <div className="pending-orders-section">
+            <h4>미체결 지정가 주문</h4>
+            <div className="pending-orders-list">
+              {pendingOrders.map((po) => (
+                <div key={po.id} className="pending-order-item">
+                  <div className="pending-order-info">
+                    <span className="pending-order-price">₩{formatPrice(po.limit_price)}</span>
+                    <span className="pending-order-amount">{formatKRW(po.amount_krw)}</span>
+                    <span className="pending-order-expiry">
+                      만료 {new Date(po.expires_at * 1000).toLocaleTimeString("ko-KR", {
+                        hour: "2-digit", minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => cancelPendingOrder(po.id)}
+                  >
+                    취소
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -48,5 +48,12 @@ export function useApi(accessToken: string | null, onUnauthorized: () => void) {
     return handleResponse<T>(res);
   }, [headers, handleResponse]);
 
-  return { get, post, postJson, patchJson };
+  const del = useCallback(async <T>(path: string): Promise<T> => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "DELETE", headers: headers(),
+    });
+    return handleResponse<T>(res);
+  }, [headers, handleResponse]);
+
+  return { get, post, postJson, patchJson, del };
 }

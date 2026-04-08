@@ -2221,6 +2221,23 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.75rem; text-transform: uppercase;
   color: var(--text-muted, #888); font-weight: 600;
 }
+.th-tip {
+  cursor: help;
+  border-bottom: 1px dotted var(--text-muted, #888);
+}
+.ranking-tooltip {
+  position: fixed;
+  background: var(--bg-card, #1e1e3a);
+  color: var(--text, #eee);
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -100%) translateY(-8px);
+}
 .ranking-table td {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border, #2a2a4a);
