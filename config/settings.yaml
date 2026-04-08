@@ -13,7 +13,7 @@ risk:
   take_profit_pct: 0.08
   trailing_stop_pct: 0.015
   max_daily_loss_pct: 0.05
-  max_daily_trades: 50
+  max_daily_trades: 500
   consecutive_loss_limit: 5
   cooldown_minutes: 60
   partial_take_profit_pct: 0.04
@@ -34,6 +34,9 @@ strategy:
 collector:
   candle_timeframe: 1
   max_candles_per_market: 500
+  train_timeframe: 15
+  train_candles: 960
+  daily_candles: 30
   market_refresh_interval_min: 60
 entry_analyzer:
   min_entry_score: 0.3

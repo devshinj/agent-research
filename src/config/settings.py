@@ -65,6 +65,9 @@ class CollectorConfig:
     candle_timeframe: int
     max_candles_per_market: int
     market_refresh_interval_min: int
+    train_timeframe: int = 15
+    train_candles: int = 960
+    daily_candles: int = 30
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,9 @@ class Settings:
                 candle_timeframe=int(raw["collector"]["candle_timeframe"]),
                 max_candles_per_market=int(raw["collector"]["max_candles_per_market"]),
                 market_refresh_interval_min=int(raw["collector"]["market_refresh_interval_min"]),
+                train_timeframe=int(raw["collector"].get("train_timeframe", 15)),
+                train_candles=int(raw["collector"].get("train_candles", 960)),
+                daily_candles=int(raw["collector"].get("daily_candles", 30)),
             ),
             entry_analyzer=EntryAnalyzerConfig(
                 min_entry_score=Decimal(str(raw.get("entry_analyzer", {}).get("min_entry_score", "0.5"))),
@@ -204,6 +210,9 @@ class Settings:
                 "candle_timeframe": self.collector.candle_timeframe,
                 "max_candles_per_market": self.collector.max_candles_per_market,
                 "market_refresh_interval_min": self.collector.market_refresh_interval_min,
+                "train_timeframe": self.collector.train_timeframe,
+                "train_candles": self.collector.train_candles,
+                "daily_candles": self.collector.daily_candles,
             },
             "entry_analyzer": {
                 "min_entry_score": float(self.entry_analyzer.min_entry_score),
