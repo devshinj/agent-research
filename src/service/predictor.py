@@ -16,7 +16,7 @@ from src.types.models import Signal, SignalBasis
 
 logger = logging.getLogger(__name__)
 
-LABEL_TO_SIGNAL = {0: SignalType.SELL, 1: SignalType.HOLD, 2: SignalType.BUY}
+LABEL_TO_SIGNAL = {0: SignalType.HOLD, 1: SignalType.BUY}
 
 _EMPTY_BASIS = SignalBasis(top_features=())
 
@@ -65,8 +65,9 @@ class Predictor:
         if features.empty:
             return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
-        latest = features.dropna().iloc[-1:]
-        if latest.empty:
+        features = features.ffill()
+        latest = features.iloc[-1:]
+        if latest.isna().any(axis=1).iloc[0]:
             return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
         proba = model.predict_proba(latest)[0]  # type: ignore[union-attr]

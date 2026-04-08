@@ -37,7 +37,7 @@ def test_train_then_predict(tmp_path):
     predictor.load_model("KRW-BTC", result["model_path"])
     signal, _basis = predictor.predict("KRW-BTC", df.tail(200).reset_index(drop=True))
 
-    assert signal.signal_type in (SignalType.BUY, SignalType.SELL, SignalType.HOLD)
+    assert signal.signal_type in (SignalType.BUY, SignalType.HOLD)
     assert signal.market == "KRW-BTC"
 
 
@@ -53,4 +53,4 @@ def test_model_persisted_and_reloadable(tmp_path):
     predictor2.load_model("KRW-BTC", result["model_path"])
 
     signal, _basis = predictor2.predict("KRW-BTC", df.tail(200).reset_index(drop=True))
-    assert signal.signal_type in (SignalType.BUY, SignalType.SELL, SignalType.HOLD)
+    assert signal.signal_type in (SignalType.BUY, SignalType.HOLD)

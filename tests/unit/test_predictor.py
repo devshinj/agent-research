@@ -37,7 +37,7 @@ def test_predictor_returns_signal_and_basis(trained_model):
     predictor.load_model("KRW-BTC", trained_model)
     df = make_data(200)
     signal, basis = predictor.predict("KRW-BTC", df)
-    assert signal.signal_type in (SignalType.BUY, SignalType.SELL, SignalType.HOLD)
+    assert signal.signal_type in (SignalType.BUY, SignalType.HOLD)
     assert 0 <= signal.confidence <= 1
     assert isinstance(basis, SignalBasis)
     if signal.signal_type != SignalType.HOLD:
