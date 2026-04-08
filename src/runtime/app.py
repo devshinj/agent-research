@@ -18,6 +18,7 @@ from src.repository.database import Database
 from src.repository.order_repo import OrderRepository
 from src.repository.portfolio_repo import PortfolioRepository
 from src.repository.signal_repo import SignalRepository
+from src.repository.ranking_repo import RankingRepo
 from src.repository.user_repo import UserRepo
 from src.runtime.event_bus import EventBus
 from src.runtime.scheduler import Scheduler
@@ -109,12 +110,21 @@ class App:
 
         # User repository
         self.user_repo = UserRepo(self.db)
+        self.ranking_repo = RankingRepo(self.db)
+
+    MAX_WS_OUTBOX_PER_USER = 100
 
     def _push_ws_message(self, user_id: int, msg: dict[str, object]) -> None:
-        self._ws_outbox.setdefault(user_id, []).append(msg)
+        queue = self._ws_outbox.setdefault(user_id, [])
+        queue.append(msg)
+        if len(queue) > self.MAX_WS_OUTBOX_PER_USER:
+            self._ws_outbox[user_id] = queue[-self.MAX_WS_OUTBOX_PER_USER:]
 
     def _pop_ws_messages(self, user_id: int) -> list[dict[str, object]]:
         return self._ws_outbox.pop(user_id, [])
+
+    def _clear_ws_outbox(self, user_id: int) -> None:
+        self._ws_outbox.pop(user_id, None)
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -276,23 +286,22 @@ class App:
                 self.training_in_progress.pop(market, None)
 
     async def _retrain(self) -> None:
-        """Retrain models for all screened markets."""
+        """Retrain models for all screened markets one at a time to limit memory."""
         if not self.screened_markets:
             return
 
         logger.info("Starting periodic retrain for %d markets", len(self.screened_markets))
         timeframe = f"{self.settings.collector.candle_timeframe}m"
         trained = 0
+        total = 0
 
-        async with self._db_lock:
-            candle_data: dict[str, pd.DataFrame] = {}
-            for market in self.screened_markets:
+        for market in list(self.screened_markets):
+            async with self._db_lock:
                 candles = await self.candle_repo.get_latest(market, timeframe, limit=2000)
-                if len(candles) < 200:
-                    continue
-                candle_data[market] = self._candles_to_df(candles)
-
-        for market, df in candle_data.items():
+            if len(candles) < 200:
+                continue
+            total += 1
+            df = self._candles_to_df(candles)
             self.training_in_progress[market] = time.time()
             try:
                 result = self.trainer.train(market, df)
@@ -301,8 +310,9 @@ class App:
                     trained += 1
             finally:
                 self.training_in_progress.pop(market, None)
+            del df
 
-        logger.info("Retrain complete: %d/%d markets updated", trained, len(self.screened_markets))
+        logger.info("Retrain complete: %d/%d markets updated", trained, total)
 
     async def stop(self) -> None:
         await self._save_all_states()

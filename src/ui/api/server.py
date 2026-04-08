@@ -12,6 +12,7 @@ from src.ui.api.routes import control, dashboard, exchange, portfolio, risk, str
 from src.ui.api.routes import auth as auth_router
 from src.ui.api.routes import admin as admin_router
 from src.ui.api.routes import agent as agent_router
+from src.ui.api.routes import ranking as ranking_router
 
 
 def create_app() -> FastAPI:
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(control.router, prefix="/api/control", tags=["control"])
     app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
     app.include_router(agent_router.router, prefix="/api/agent", tags=["agent"])
+    app.include_router(ranking_router.router, prefix="/api/ranking", tags=["ranking"])
 
     @app.on_event("startup")
     async def _configure_auth_on_startup() -> None:
@@ -102,8 +104,9 @@ def create_app() -> FastAPI:
 
                 for msg in messages:
                     await ws.send_text(json.dumps(msg))
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
         except WebSocketDisconnect:
-            pass
+            if app_instance and hasattr(app_instance, "_clear_ws_outbox"):
+                app_instance._clear_ws_outbox(user_id)
 
     return app
