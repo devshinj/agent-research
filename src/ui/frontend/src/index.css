@@ -2249,6 +2249,7 @@ input[type="range"]::-moz-range-thumb {
 
 .ranking-rank { white-space: nowrap; font-size: 1rem; }
 .ranking-nickname { font-weight: 500; }
+.ranking-money { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ranking-return { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .positive { color: #22c55e; }

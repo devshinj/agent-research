@@ -90,11 +90,15 @@ class RankingRepo:
                 Decimal(r[0]) for r in reversed(equity_rows)
             )
 
+            total_pnl = total_equity - initial_balance
+
             entries.append(RankingEntry(
                 rank=0,  # assigned after sorting
                 user_id=uid,
                 nickname=nickname,
                 return_pct=return_pct,
+                total_pnl=total_pnl,
+                initial_balance=initial_balance,
                 win_rate=win_rate,
                 total_trades=total_trades,
                 max_drawdown_pct=max_drawdown_pct,
@@ -111,6 +115,8 @@ class RankingRepo:
                 user_id=entry.user_id,
                 nickname=entry.nickname,
                 return_pct=entry.return_pct,
+                total_pnl=entry.total_pnl,
+                initial_balance=entry.initial_balance,
                 win_rate=entry.win_rate,
                 total_trades=entry.total_trades,
                 max_drawdown_pct=entry.max_drawdown_pct,

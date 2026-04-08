@@ -29,6 +29,8 @@ async def get_ranking(
                 "user_id": e.user_id,
                 "nickname": e.nickname,
                 "return_pct": str(e.return_pct),
+                "total_pnl": str(e.total_pnl),
+                "initial_balance": str(e.initial_balance),
                 "win_rate": str(e.win_rate),
                 "total_trades": e.total_trades,
                 "max_drawdown_pct": str(e.max_drawdown_pct),

@@ -35,14 +35,18 @@ def sample_entries():
     return [
         RankingEntry(
             rank=1, user_id=1, nickname="Alice",
-            return_pct=Decimal("15.23"), win_rate=Decimal("68.50"),
+            return_pct=Decimal("15.23"), total_pnl=Decimal("152300"),
+            initial_balance=Decimal("1000000"),
+            win_rate=Decimal("68.50"),
             total_trades=42, max_drawdown_pct=Decimal("3.70"),
             daily_equities=(Decimal("1000000"), Decimal("1050000"), Decimal("1152300")),
             is_me=False,
         ),
         RankingEntry(
             rank=2, user_id=2, nickname="Bob",
-            return_pct=Decimal("10.00"), win_rate=Decimal("55.00"),
+            return_pct=Decimal("10.00"), total_pnl=Decimal("100000"),
+            initial_balance=Decimal("1000000"),
+            win_rate=Decimal("55.00"),
             total_trades=20, max_drawdown_pct=Decimal("5.10"),
             daily_equities=(Decimal("1000000"), Decimal("1100000")),
             is_me=True,

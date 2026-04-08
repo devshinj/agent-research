@@ -101,6 +101,8 @@ class RankingEntry:
     user_id: int
     nickname: str
     return_pct: Decimal
+    total_pnl: Decimal
+    initial_balance: Decimal
     win_rate: Decimal
     total_trades: int
     max_drawdown_pct: Decimal

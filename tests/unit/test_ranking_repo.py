@@ -89,6 +89,8 @@ async def test_ranking_single_user(repos):
     assert entry.rank == 1
     assert entry.nickname == "Alice"
     assert entry.return_pct == Decimal("10.00")  # (1100000-1000000)/1000000*100
+    assert entry.total_pnl == Decimal("100000")  # 1100000-1000000
+    assert entry.initial_balance == Decimal("1000000")
     assert entry.total_trades == 8  # 5+3
     assert entry.win_rate == Decimal("62.50")  # 5/(5+3)*100
     assert entry.max_drawdown_pct == Decimal("2.1")  # max of 2.1, 1.5

@@ -11,6 +11,8 @@ interface RankingEntry {
   user_id: number;
   nickname: string;
   return_pct: string;
+  total_pnl: string;
+  initial_balance: string;
   win_rate: string;
   total_trades: number;
   max_drawdown_pct: string;
@@ -23,6 +25,11 @@ interface RankingResponse {
   my_rank: number | null;
   total_users: number;
 }
+
+const fmtKrw = (v: string) => {
+  const n = Math.trunc(Number(v));
+  return n.toLocaleString("ko-KR");
+};
 
 export default function Ranking() {
   const { api } = useAuthContext();
@@ -86,6 +93,8 @@ export default function Ranking() {
             <tr>
               <th>순위</th>
               <th>닉네임</th>
+              <th>투자금</th>
+              <th>손익</th>
               <th>수익률</th>
               <th>승률</th>
               <th>거래</th>
@@ -123,6 +132,14 @@ export default function Ranking() {
                     {entry.nickname}
                     {entry.is_me && <span className="me-badge">나</span>}
                   </td>
+                  <td className="ranking-money">₩{fmtKrw(entry.initial_balance)}</td>
+                  <td
+                    className={`ranking-money ${
+                      Number(entry.total_pnl) >= 0 ? "positive" : "negative"
+                    }`}
+                  >
+                    {Number(entry.total_pnl) >= 0 ? "+" : ""}₩{fmtKrw(entry.total_pnl)}
+                  </td>
                   <td
                     className={`ranking-return ${
                       returnNum >= 0 ? "positive" : "negative"
@@ -156,7 +173,7 @@ export default function Ranking() {
             })}
             {data.rankings.length === 0 && (
               <tr>
-                <td colSpan={7} className="ranking-empty">
+                <td colSpan={9} className="ranking-empty">
                   아직 랭킹 데이터가 없습니다
                 </td>
               </tr>
