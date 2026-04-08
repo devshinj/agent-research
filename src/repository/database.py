@@ -223,6 +223,19 @@ class Database:
             " ON daily_summary(user_id, date)"
         )
 
+        # ── balance_ledger table ──
+        await self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS balance_ledger (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                admin_id   INTEGER NOT NULL REFERENCES users(id),
+                amount     TEXT NOT NULL,
+                balance_after TEXT NOT NULL,
+                memo       TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        """)
+
     @property
     def conn(self) -> aiosqlite.Connection:
         if self._conn is None:
