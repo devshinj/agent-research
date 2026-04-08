@@ -850,8 +850,16 @@ function AgentChat({ market, accessToken }: { market: string; accessToken: strin
                   <div className="agent-msg-content">
                     {msg.role === "assistant" ? (
                       <>
-                        <Markdown>{msg.content}</Markdown>
-                        {isStreaming && i === messages.length - 1 && (
+                        {isStreaming && i === messages.length - 1 && !msg.content && (
+                          <div className="agent-loading">
+                            <div className="agent-loading-dots">
+                              <span /><span /><span />
+                            </div>
+                            <span className="agent-loading-text">분석 중...</span>
+                          </div>
+                        )}
+                        {msg.content && <Markdown>{msg.content}</Markdown>}
+                        {isStreaming && i === messages.length - 1 && msg.content && (
                           <span className="streaming-cursor" />
                         )}
                       </>
