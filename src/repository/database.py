@@ -174,6 +174,19 @@ class Database:
                     f"ALTER TABLE {table} ADD COLUMN {col_def}"
                 )
 
+        await self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_account_state_user"
+            " ON account_state(user_id)"
+        )
+        await self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_state_user"
+            " ON risk_state(user_id)"
+        )
+        await self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_summary_user_date"
+            " ON daily_summary(user_id, date)"
+        )
+
     @property
     def conn(self) -> aiosqlite.Connection:
         if self._conn is None:
