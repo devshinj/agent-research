@@ -65,3 +65,53 @@ def test_trainer_with_insufficient_data(tmp_path):
     result = trainer.train("KRW-BTC", df)
     assert result["accuracy"] == 0
     assert result["model_path"] is None
+
+
+def make_daily_data(n: int = 30) -> pd.DataFrame:
+    np.random.seed(42)
+    close = 50000000 + np.cumsum(np.random.randn(n) * 500000)
+    return pd.DataFrame({
+        "open": close - np.random.rand(n) * 200000,
+        "high": close + np.abs(np.random.randn(n)) * 500000,
+        "low": close - np.abs(np.random.randn(n)) * 500000,
+        "close": close,
+        "volume": np.random.rand(n) * 1000 + 10,
+    })
+
+
+def test_trainer_with_daily_context(tmp_path):
+    """학습 시 일봉 context를 전달하면 30개 feature 모델이 생성된다."""
+    df = make_training_data(500)
+    daily_df = make_daily_data(30)
+    feature_builder = FeatureBuilder()
+    trainer = Trainer(feature_builder, str(tmp_path), 5, 0.3)
+    result = trainer.train("KRW-BTC", df, daily_df=daily_df)
+    assert result["model_path"] is not None
+    import json
+    meta = json.loads(result["model_path"].with_suffix(".json").read_text())
+    assert "daily_rsi_14" in meta["features"]
+    assert len(meta["features"]) == 30
+
+
+def test_trainer_metadata_includes_f1(tmp_path):
+    """메타데이터에 f1, precision, recall이 포함된다."""
+    df = make_training_data(500)
+    feature_builder = FeatureBuilder()
+    trainer = Trainer(feature_builder, str(tmp_path), 5, 0.3)
+    result = trainer.train("KRW-BTC", df)
+    import json
+    meta = json.loads(result["model_path"].with_suffix(".json").read_text())
+    assert "f1" in meta
+    assert "precision" in meta
+    assert "recall" in meta
+    assert "buy_ratio" in meta
+
+
+def test_trainer_result_includes_f1(tmp_path):
+    """train() 반환값에 f1이 포함된다."""
+    df = make_training_data(500)
+    feature_builder = FeatureBuilder()
+    trainer = Trainer(feature_builder, str(tmp_path), 5, 0.3)
+    result = trainer.train("KRW-BTC", df)
+    assert "f1" in result
+    assert isinstance(result["f1"], float)

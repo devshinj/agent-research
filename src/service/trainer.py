@@ -10,6 +10,7 @@ import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from sklearn.metrics import f1_score, precision_score, recall_score
 
 from src.service.features import FeatureBuilder
 
@@ -40,11 +41,22 @@ class Trainer:
         labels[future_return > self._threshold] = 1  # BUY
         return labels
 
-    def train(self, market: str, candle_df: pd.DataFrame) -> dict[str, Any]:
+    def train(
+        self,
+        market: str,
+        candle_df: pd.DataFrame,
+        daily_df: pd.DataFrame | None = None,
+    ) -> dict[str, Any]:
         features = self._fb.build(candle_df)
         if features.empty:
             logger.warning("Insufficient data for %s", market)
-            return {"accuracy": 0, "model_path": None}
+            return {"accuracy": 0, "f1": 0.0, "model_path": None}
+
+        # 일봉 context feature 합류
+        if daily_df is not None and len(daily_df) >= 20:
+            daily_ctx = self._fb.build_daily_context(daily_df)
+            for col_name, val in daily_ctx.items():
+                features[col_name] = val
 
         labels = self._create_labels(candle_df).loc[features.index]
 
@@ -55,28 +67,42 @@ class Trainer:
 
         if len(features) < 100:
             logger.warning("Not enough valid samples for %s: %d", market, len(features))
-            return {"accuracy": 0, "model_path": None}
+            return {"accuracy": 0, "f1": 0.0, "model_path": None}
 
         # Time-series split (80/20, no shuffle)
         split_idx = int(len(features) * 0.8)
         X_train, X_val = features.iloc[:split_idx], features.iloc[split_idx:]
         y_train, y_val = labels.iloc[:split_idx], labels.iloc[split_idx:]
 
+        # 라벨 불균형 대응
+        n_hold = int((y_train == 0).sum())
+        n_buy = int((y_train == 1).sum())
+        spw = n_hold / max(n_buy, 1)
+
         model = lgb.LGBMClassifier(
-            n_estimators=200,
+            n_estimators=500,
             learning_rate=0.05,
             max_depth=6,
             num_leaves=31,
             subsample=0.8,
             colsample_bytree=0.8,
+            scale_pos_weight=spw,
             random_state=42,
             verbose=-1,
             n_jobs=1,
         )
-        model.fit(X_train, y_train)
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            callbacks=[lgb.early_stopping(30), lgb.log_evaluation(0)],
+        )
 
         val_pred = model.predict(X_val)
         accuracy = float(np.mean(val_pred == y_val))
+        val_f1 = float(f1_score(y_val, val_pred, zero_division=0))
+        val_precision = float(precision_score(y_val, val_pred, zero_division=0))
+        val_recall = float(recall_score(y_val, val_pred, zero_division=0))
+        buy_ratio = float(labels.mean())
 
         # Save model
         timestamp = time.strftime("%Y%m%d_%H%M")
@@ -89,13 +115,24 @@ class Trainer:
         meta = {
             "market": market,
             "accuracy": accuracy,
+            "f1": val_f1,
+            "precision": val_precision,
+            "recall": val_recall,
+            "buy_ratio": buy_ratio,
+            "scale_pos_weight": round(spw, 2),
             "n_train": len(X_train),
             "n_val": len(X_val),
+            "best_iteration": model.best_iteration_ if hasattr(model, "best_iteration_") else -1,
             "features": list(features.columns),
             "timestamp": timestamp,
         }
         meta_path = model_path.with_suffix(".json")
         meta_path.write_text(json.dumps(meta, indent=2))
 
-        logger.info("Trained %s — accuracy: %.3f, saved: %s", market, accuracy, model_path)
-        return {"accuracy": accuracy, "model_path": model_path}
+        logger.info(
+            "Trained %s — f1: %.3f, precision: %.3f, recall: %.3f, accuracy: %.3f, "
+            "buy_ratio: %.3f, spw: %.1f, saved: %s",
+            market, val_f1, val_precision, val_recall, accuracy,
+            buy_ratio, spw, model_path,
+        )
+        return {"accuracy": accuracy, "f1": val_f1, "model_path": model_path}
