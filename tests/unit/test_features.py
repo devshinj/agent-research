@@ -69,3 +69,52 @@ def test_build_with_short_data():
     builder = FeatureBuilder()
     features = builder.build(df)
     assert isinstance(features, pd.DataFrame)
+
+
+def make_daily_df(n: int = 30) -> pd.DataFrame:
+    """테스트용 일봉 DataFrame 생성"""
+    np.random.seed(42)
+    close = 50000000 + np.cumsum(np.random.randn(n) * 500000)
+    return pd.DataFrame({
+        "open": close - np.random.rand(n) * 200000,
+        "high": close + np.abs(np.random.randn(n)) * 500000,
+        "low": close - np.abs(np.random.randn(n)) * 500000,
+        "close": close,
+        "volume": np.random.rand(n) * 1000 + 10,
+    })
+
+
+def test_build_daily_context_returns_series():
+    df = make_daily_df(30)
+    builder = FeatureBuilder()
+    ctx = builder.build_daily_context(df)
+    assert isinstance(ctx, pd.Series)
+    expected_keys = [
+        "daily_rsi_14", "daily_ema_5_ratio", "daily_ema_20_ratio",
+        "daily_volume_ratio", "daily_trend", "daily_atr_ratio",
+    ]
+    for key in expected_keys:
+        assert key in ctx.index, f"Missing daily context feature: {key}"
+
+
+def test_build_daily_context_no_nan_with_enough_data():
+    df = make_daily_df(30)
+    builder = FeatureBuilder()
+    ctx = builder.build_daily_context(df)
+    assert not ctx.isna().any(), f"NaN found in daily context: {ctx[ctx.isna()].index.tolist()}"
+
+
+def test_build_daily_context_short_data_returns_nan():
+    df = make_daily_df(5)
+    builder = FeatureBuilder()
+    ctx = builder.build_daily_context(df)
+    assert isinstance(ctx, pd.Series)
+    assert len(ctx) == 6
+
+
+def test_get_feature_names_includes_daily():
+    builder = FeatureBuilder()
+    names = builder.get_feature_names()
+    assert "daily_rsi_14" in names
+    assert "daily_trend" in names
+    assert len(names) == 30
