@@ -48,7 +48,7 @@ class UserRepo:
         # Create default account_state (user_id is PK after migration)
         await conn.execute(
             "INSERT OR IGNORE INTO account_state (user_id, cash_balance, updated_at)"
-            " VALUES (?, '5000000', ?)",
+            " VALUES (?, '0', ?)",
             (user_id, now),
         )
         # Create default risk_state (user_id is PK after migration)
@@ -97,7 +97,7 @@ class UserRepo:
         )
         row = await cursor.fetchone()
         if row is None:
-            raise ValueError(f"account_state not found for user_id={user_id}")
+            return Decimal("0")
         return Decimal(row[0])
 
     async def adjust_balance(
@@ -115,6 +115,17 @@ class UserRepo:
             "UPDATE account_state SET cash_balance = ?, updated_at = ? WHERE user_id = ?",
             (str(new_balance), now, user_id),
         )
+        # Adjust initial_balance so admin top-ups don't affect PnL
+        row = await conn.execute_fetchall(
+            "SELECT initial_balance FROM user_settings WHERE user_id = ?",
+            (user_id,),
+        )
+        if row:
+            new_initial = Decimal(row[0][0]) + amount
+            await conn.execute(
+                "UPDATE user_settings SET initial_balance = ? WHERE user_id = ?",
+                (str(new_initial), user_id),
+            )
         await conn.execute(
             "INSERT INTO balance_ledger (user_id, admin_id, amount, balance_after, memo, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?)",
