@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
+
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -37,15 +37,6 @@ def _get_gemini_key(request: Request) -> str:
             key = getattr(key, "gemini_api_key", "")
     if not key:
         key = os.environ.get("GEMINI_API_KEY", "")
-    if not key:
-        # Fallback: read from .env file directly
-        env_path = Path(".env")
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line.startswith("GEMINI_API_KEY="):
-                    key = line.split("=", 1)[1].strip()
-                    break
     return key
 
 

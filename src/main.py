@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 import uvicorn
@@ -16,7 +17,21 @@ logging.basicConfig(
 )
 
 
+def _load_dotenv(path: str = ".env") -> None:
+    """Load .env file into os.environ (only sets missing keys)."""
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 async def main() -> None:
+    _load_dotenv()
     settings = Settings.from_yaml(Path("config/settings.yaml"))
     app = App(settings)
     await app.start()

@@ -43,9 +43,7 @@ def test_agent_chat_requires_auth(client):
 
 def test_agent_chat_no_api_key(client, auth_header):
     """Returns 503 when no Gemini API key is configured."""
-    with patch.dict(os.environ, {}, clear=True), \
-         patch("src.ui.api.routes.agent.Path") as mock_path:
-        mock_path.return_value.exists.return_value = False
+    with patch.dict(os.environ, {}, clear=True):
         res = client.post(
             "/api/agent/chat",
             json={"market": "KRW-BTC", "message": "hi", "history": []},
