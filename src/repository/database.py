@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS screening_log (
 );
 
 CREATE TABLE IF NOT EXISTS account_state (
-    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id       INTEGER PRIMARY KEY,
     cash_balance  TEXT NOT NULL,
     updated_at    INTEGER NOT NULL
 );
@@ -74,13 +74,13 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 
 CREATE TABLE IF NOT EXISTS risk_state (
-    id                  INTEGER PRIMARY KEY CHECK (id = 1),
-    consecutive_losses  INTEGER NOT NULL,
-    cooldown_until      INTEGER NOT NULL,
-    daily_loss          TEXT NOT NULL,
-    daily_trades        INTEGER NOT NULL,
-    current_day         TEXT NOT NULL,
-    updated_at          INTEGER NOT NULL
+    user_id              INTEGER PRIMARY KEY,
+    consecutive_losses   INTEGER NOT NULL,
+    cooldown_until       INTEGER NOT NULL,
+    daily_loss           TEXT NOT NULL,
+    daily_trades         INTEGER NOT NULL,
+    current_day          TEXT NOT NULL,
+    updated_at           INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signals (
@@ -174,14 +174,50 @@ class Database:
                     f"ALTER TABLE {table} ADD COLUMN {col_def}"
                 )
 
-        await self._conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_account_state_user"
-            " ON account_state(user_id)"
+        # Remove CHECK(id=1) singleton constraint from account_state and risk_state
+        # by recreating tables without the constraint (SQLite doesn't support DROP CHECK)
+        cursor = await self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='account_state'"
         )
-        await self._conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_state_user"
-            " ON risk_state(user_id)"
+        row = await cursor.fetchone()
+        if row and "CHECK" in row[0]:
+            await self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS account_state_new (
+                    user_id       INTEGER PRIMARY KEY,
+                    cash_balance  TEXT NOT NULL,
+                    updated_at    INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO account_state_new (user_id, cash_balance, updated_at)
+                    SELECT user_id, cash_balance, updated_at FROM account_state;
+                DROP TABLE account_state;
+                ALTER TABLE account_state_new RENAME TO account_state;
+            """)
+
+        cursor = await self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='risk_state'"
         )
+        row = await cursor.fetchone()
+        if row and "CHECK" in row[0]:
+            await self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS risk_state_new (
+                    user_id              INTEGER PRIMARY KEY,
+                    consecutive_losses   INTEGER NOT NULL,
+                    cooldown_until       INTEGER NOT NULL,
+                    daily_loss           TEXT NOT NULL,
+                    daily_trades         INTEGER NOT NULL,
+                    current_day          TEXT NOT NULL,
+                    updated_at           INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO risk_state_new
+                    (user_id, consecutive_losses, cooldown_until, daily_loss,
+                     daily_trades, current_day, updated_at)
+                    SELECT user_id, consecutive_losses, cooldown_until, daily_loss,
+                           daily_trades, current_day, updated_at
+                    FROM risk_state;
+                DROP TABLE risk_state;
+                ALTER TABLE risk_state_new RENAME TO risk_state;
+            """)
+
         await self._conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_summary_user_date"
             " ON daily_summary(user_id, date)"

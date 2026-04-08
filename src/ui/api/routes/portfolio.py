@@ -100,7 +100,7 @@ async def get_history(
             "reason": o.reason,
         })
 
-    total = await app.order_repo.count_since(0)
+    total = await app.order_repo.count_since(user_id, 0)
     return {"items": items, "page": page, "size": size, "total": total}
 
 

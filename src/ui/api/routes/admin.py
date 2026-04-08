@@ -49,3 +49,34 @@ async def update_user(user_id: int, body: SetActiveRequest, request: Request):
         del app.user_risk[user_id]
 
     return {"id": user_id, "is_active": body.is_active}
+
+
+@router.get("/users/{user_id}/settings")
+async def get_user_settings(user_id: int, request: Request):
+    app = request.app.state.app
+    user = await app.user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    settings = await app.user_repo.get_settings(user_id)
+    return settings
+
+
+@router.patch("/users/{user_id}/settings")
+async def update_user_settings(user_id: int, request: Request):
+    app = request.app.state.app
+    user = await app.user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    body = await request.json()
+    allowed = {
+        "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
+        "max_daily_loss_pct", "max_position_pct", "max_open_positions",
+        "initial_balance", "trading_enabled",
+    }
+    patches = {k: v for k, v in body.items() if k in allowed}
+    if not patches:
+        raise HTTPException(status_code=400, detail="No valid fields")
+    await app.user_repo.update_settings(user_id, patches)
+    if user_id in app.user_accounts:
+        await app.load_user(user_id)
+    return {"updated": list(patches.keys())}

@@ -44,24 +44,19 @@ class UserRepo:
         await conn.execute(
             "INSERT INTO user_settings (user_id) VALUES (?)", (user_id,)
         )
-        # Create default account_state using user_id as the id column
-        # The table has id INTEGER PRIMARY KEY CHECK (id = 1) for legacy singleton,
-        # but user_id column was added via migration. We store user_id in both
-        # id and user_id columns; use INSERT OR IGNORE so subsequent users
-        # that conflict on id=1 are silently skipped (their data is managed
-        # separately via user_id filtering).
+        # Create default account_state (user_id is PK after migration)
         await conn.execute(
-            "INSERT OR IGNORE INTO account_state (id, cash_balance, user_id, updated_at)"
-            " VALUES (?, '5000000', ?, ?)",
-            (user_id, user_id, now),
+            "INSERT OR IGNORE INTO account_state (user_id, cash_balance, updated_at)"
+            " VALUES (?, '5000000', ?)",
+            (user_id, now),
         )
-        # Create default risk_state similarly
+        # Create default risk_state (user_id is PK after migration)
         await conn.execute(
             "INSERT OR IGNORE INTO risk_state"
-            " (id, user_id, consecutive_losses, cooldown_until, daily_loss,"
+            " (user_id, consecutive_losses, cooldown_until, daily_loss,"
             "  daily_trades, current_day, updated_at)"
-            " VALUES (?, ?, 0, 0, '0', 0, ?, ?)",
-            (user_id, user_id, now[:10], now),
+            " VALUES (?, 0, 0, '0', 0, ?, ?)",
+            (user_id, now[:10], now),
         )
         await conn.commit()
 
