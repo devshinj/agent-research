@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from collections.abc import Sequence
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +16,10 @@ from src.config.settings import Settings
 from src.repository.candle_repo import CandleRepository
 from src.repository.database import Database
 from src.repository.order_repo import OrderRepository
+from src.repository.pending_order_repo import PendingOrderRepo
 from src.repository.portfolio_repo import PortfolioRepository
-from src.repository.signal_repo import SignalRepository
 from src.repository.ranking_repo import RankingRepo
+from src.repository.signal_repo import SignalRepository
 from src.repository.user_repo import UserRepo
 from src.runtime.event_bus import EventBus
 from src.runtime.scheduler import Scheduler
@@ -71,6 +72,7 @@ class App:
         self.order_repo = OrderRepository(self.db)
         self.portfolio_repo = PortfolioRepository(self.db)
         self.signal_repo = SignalRepository(self.db)
+        self.pending_order_repo = PendingOrderRepo(self.db)
 
         # Services
         self.upbit = UpbitClient()
@@ -190,6 +192,9 @@ class App:
         # Cleanup stale data on startup
         await self._cleanup_stale_data()
 
+        # Recover pending limit orders
+        await self._recover_pending_orders()
+
         # Initial data
         await self.collector.refresh_markets()
 
@@ -203,7 +208,7 @@ class App:
         # Schedule periodic tasks
         self.scheduler.schedule_interval(
             "monitor_positions", self._monitor_positions,
-            interval_seconds=30,
+            interval_seconds=10,
         )
         self.scheduler.schedule_interval(
             "collect_candles", self._collect_and_predict,
@@ -355,6 +360,11 @@ class App:
         else:
             # Per-user reset
             await self.load_user(user_id)
+            # Persist new account to DB so ranking query sees it immediately
+            if user_id in self.user_accounts:
+                await self.portfolio_repo.save_account(
+                    self.user_accounts[user_id], user_id
+                )
 
         self.paused = False
 
@@ -626,6 +636,18 @@ class App:
         )
         await self._save_all_states()
 
+    async def _recover_pending_orders(self) -> None:
+        """Recover pending orders on server restart: expire overdue, log active."""
+        for user_id, account in self.user_accounts.items():
+            expired = await self.pending_order_repo.expire_all(user_id, account)
+            if expired:
+                logger.info("Expired %d pending orders for user %d on startup", expired, user_id)
+                await self.portfolio_repo.save_account(account, user_id)
+
+        active = await self.pending_order_repo.get_all_pending()
+        if active:
+            logger.info("Recovered %d active pending orders", len(active))
+
     async def _monitor_positions(self) -> None:
         if self.paused:
             return
@@ -643,6 +665,9 @@ class App:
                 continue
 
             await self._monitor_user_positions(user_id, account, rm)
+
+        # Check pending limit orders
+        await self._check_pending_orders()
 
     async def _monitor_user_positions(
         self, user_id: int, account: PaperAccount, rm: RiskManager,
@@ -716,6 +741,66 @@ class App:
                 },
             })
 
+    async def _check_pending_orders(self) -> None:
+        """Check all pending limit orders for fill conditions and expiry."""
+        pending = await self.pending_order_repo.get_all_pending()
+        if not pending:
+            return
+
+        now = int(time.time())
+
+        for po in pending:
+            account = self.user_accounts.get(po.user_id)
+            if account is None:
+                continue
+
+            # Expire check
+            if po.expires_at < now:
+                expired = await self.pending_order_repo.expire_all(po.user_id, account)
+                if expired:
+                    await self._save_user_state(po.user_id)
+                    self._push_ws_message(po.user_id, {
+                        "type": "pending_order_expired",
+                        "data": {"order_id": po.id, "market": po.market},
+                    })
+                continue
+
+            # Fill check: current_price <= limit_price
+            price = self.upbit_ws.get_price(po.market)
+            if price is None:
+                continue
+
+            if price <= po.limit_price:
+                filled = await self.pending_order_repo.fill(po.id)
+                if not filled:
+                    continue  # Already processed (CAS)
+
+                order, refund = self.paper_engine.execute_limit_buy(
+                    account, po.market, price, po.amount_krw, reason="LIMIT_BUY",
+                )
+
+                await self.order_repo.save(order, po.user_id)
+                rm = self.user_risk.get(po.user_id)
+                if rm:
+                    rm.record_trade()
+                await self._save_user_state(po.user_id)
+
+                self._push_ws_message(po.user_id, {
+                    "type": "pending_order_filled",
+                    "data": {
+                        "order_id": po.id,
+                        "market": order.market,
+                        "side": order.side.value,
+                        "price": str(order.fill_price),
+                        "quantity": str(order.quantity),
+                        "refund": str(refund),
+                    },
+                })
+                logger.info(
+                    "Limit order %s filled: %s @ %s for user %d",
+                    po.id, po.market, price, po.user_id,
+                )
+
     def _record_trade_result_for_user(
         self, user_id: int, entry_price: Decimal, fill_price: Decimal, quantity: Decimal,
     ) -> None:
@@ -779,7 +864,9 @@ class App:
         loss_trades = pnl_data["losses"]
 
         drawdown_pct = (
-            (starting - total_equity) / starting * 100
+            ((starting - total_equity) / starting * 100).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
             if starting > 0 else Decimal(0)
         )
         prev_max = existing.max_drawdown_pct if existing else Decimal(0)
