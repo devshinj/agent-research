@@ -32,14 +32,16 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 
 CREATE TABLE IF NOT EXISTS daily_summary (
-    date             TEXT PRIMARY KEY,
+    date             TEXT NOT NULL,
     starting_balance TEXT NOT NULL,
     ending_balance   TEXT NOT NULL,
     realized_pnl     TEXT NOT NULL,
     total_trades     INTEGER NOT NULL,
     win_trades       INTEGER NOT NULL,
     loss_trades      INTEGER NOT NULL,
-    max_drawdown_pct TEXT NOT NULL
+    max_drawdown_pct TEXT NOT NULL,
+    user_id          INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (date, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS screening_log (
@@ -105,7 +107,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS user_settings (
     user_id              INTEGER PRIMARY KEY REFERENCES users(id),
-    initial_balance      TEXT NOT NULL DEFAULT '5000000',
+    initial_balance      TEXT NOT NULL DEFAULT '0',
     max_position_pct     TEXT NOT NULL DEFAULT '0.25',
     max_open_positions   INTEGER NOT NULL DEFAULT 4,
     stop_loss_pct        TEXT NOT NULL DEFAULT '0.03',
@@ -123,11 +125,17 @@ class Database:
         self._conn: aiosqlite.Connection | None = None
 
     async def initialize(self) -> None:
-        self._conn = await aiosqlite.connect(self._db_path, isolation_level=None)
-        await self._conn.executescript(SCHEMA_SQL)
-        await self._conn.execute("PRAGMA journal_mode=WAL")
-        await self._conn.execute("PRAGMA busy_timeout=5000")
-        await self._migrate()
+        conn = await aiosqlite.connect(self._db_path, isolation_level=None)
+        try:
+            await conn.executescript(SCHEMA_SQL)
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA busy_timeout=5000")
+            self._conn = conn
+            await self._migrate()
+        except Exception:
+            await conn.close()
+            self._conn = None
+            raise
 
     async def _migrate(self) -> None:
         """Add missing columns to existing tables."""
@@ -218,9 +226,42 @@ class Database:
                 ALTER TABLE risk_state_new RENAME TO risk_state;
             """)
 
+        # Migrate daily_summary: change PRIMARY KEY from (date) to (date, user_id)
+        cursor = await self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='daily_summary'"
+        )
+        row = await cursor.fetchone()
+        if row and "PRIMARY KEY (date," not in row[0] and '"date" TEXT PRIMARY KEY' not in row[0].replace("date TEXT PRIMARY KEY", '"date" TEXT PRIMARY KEY'):
+            # Check if it still has date as sole primary key (old schema)
+            tbl_sql: str = row[0]
+            if "PRIMARY KEY (date, user_id)" not in tbl_sql:
+                await self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS daily_summary_new (
+                        date             TEXT NOT NULL,
+                        starting_balance TEXT NOT NULL,
+                        ending_balance   TEXT NOT NULL,
+                        realized_pnl     TEXT NOT NULL,
+                        total_trades     INTEGER NOT NULL,
+                        win_trades       INTEGER NOT NULL,
+                        loss_trades      INTEGER NOT NULL,
+                        max_drawdown_pct TEXT NOT NULL,
+                        user_id          INTEGER NOT NULL DEFAULT 1,
+                        PRIMARY KEY (date, user_id)
+                    );
+                    INSERT OR IGNORE INTO daily_summary_new
+                        (date, starting_balance, ending_balance, realized_pnl,
+                         total_trades, win_trades, loss_trades, max_drawdown_pct, user_id)
+                        SELECT date, starting_balance, ending_balance, realized_pnl,
+                               total_trades, win_trades, loss_trades, max_drawdown_pct, user_id
+                        FROM daily_summary;
+                    DROP TABLE daily_summary;
+                    ALTER TABLE daily_summary_new RENAME TO daily_summary;
+                """)
+
+        # ── Reset initial_balance default from 5000000 to 0 ──
         await self._conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_summary_user_date"
-            " ON daily_summary(user_id, date)"
+            "UPDATE user_settings SET initial_balance = '0'"
+            " WHERE initial_balance = '5000000'"
         )
 
         # ── balance_ledger table ──
