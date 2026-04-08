@@ -394,6 +394,18 @@ function OrderPanel({
   const [tpPrice, setTpPrice] = useState("");
   const [confirm, setConfirm] = useState<ConfirmInfo | null>(null);
   const [tradesRefresh, setTradesRefresh] = useState(0);
+  const [feeRate, setFeeRate] = useState<number | null>(null);
+  const [slippageRate, setSlippageRate] = useState<number | null>(null);
+  const [maxBuyAmount, setMaxBuyAmount] = useState<number | null>(null);
+
+  // Fetch fee/slippage info
+  useEffect(() => {
+    get<{ amount: string; fee_rate?: string; slippage_rate?: string }>("/api/exchange/max-buy-amount").then((res) => {
+      setMaxBuyAmount(Number(res.amount) || 0);
+      if (res.fee_rate != null) setFeeRate(Number(res.fee_rate));
+      if (res.slippage_rate != null) setSlippageRate(Number(res.slippage_rate));
+    });
+  }, [get, cashBalance]);
 
   useEffect(() => {
     if (position) {
@@ -508,9 +520,15 @@ function OrderPanel({
     }
   };
 
-  const estimatedQty = Number(amount) > 0 && Number(price) > 0
-    ? (Number(amount) / Number(price)).toFixed(8)
+  const amountNum = Number(amount);
+  const estimatedQty = amountNum > 0 && Number(price) > 0
+    ? (amountNum / Number(price)).toFixed(8)
     : "0";
+  const hasFeeInfo = feeRate != null && slippageRate != null;
+  const estimatedFee = amountNum > 0 && feeRate != null ? Math.ceil(amountNum * feeRate) : 0;
+  const estimatedSlippage = amountNum > 0 && slippageRate != null ? Math.ceil(amountNum * slippageRate) : 0;
+  const totalCost = amountNum + estimatedFee + estimatedSlippage;
+  const exceedsCash = amountNum > 0 && maxBuyAmount != null && amountNum > maxBuyAmount;
 
   return (
     <div className="panel">
@@ -552,7 +570,28 @@ function OrderPanel({
               <span className="order-label">예상 수량</span>
               <span className="order-value">{estimatedQty}</span>
             </div>
-            <button className="btn btn-accent order-submit" onClick={handleBuy}>
+            {amountNum > 0 && hasFeeInfo && (
+              <div className="order-fee-info">
+                <div className="order-info-row">
+                  <span className="order-label">수수료 ({(feeRate! * 100).toFixed(2)}%)</span>
+                  <span className="order-value">₩{estimatedFee.toLocaleString("ko-KR")}</span>
+                </div>
+                <div className="order-info-row">
+                  <span className="order-label">슬리피지 ({(slippageRate! * 100).toFixed(2)}%)</span>
+                  <span className="order-value">₩{estimatedSlippage.toLocaleString("ko-KR")}</span>
+                </div>
+                <div className="order-info-row" style={{ fontWeight: 600 }}>
+                  <span className="order-label">총 예상 비용</span>
+                  <span className="order-value">₩{totalCost.toLocaleString("ko-KR")}</span>
+                </div>
+              </div>
+            )}
+            {exceedsCash && (
+              <div className="order-warning">
+                잔고가 부족합니다. 수수료·슬리피지 포함 최대 ₩{maxBuyAmount!.toLocaleString("ko-KR")}까지 매수할 수 있습니다.
+              </div>
+            )}
+            <button className="btn btn-accent order-submit" onClick={handleBuy} disabled={exceedsCash || amountNum <= 0}>
               매수 주문
             </button>
           </div>
@@ -640,6 +679,212 @@ function OrderPanel({
   );
 }
 
+/* ── AgentChat ─────────────────────────────────── */
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  sources?: { title: string; url: string }[];
+}
+
+function AgentChat({ market, accessToken }: { market: string; accessToken: string | null }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevMarketRef = useRef(market);
+
+  const API_BASE = import.meta.env.VITE_API_URL || "";
+
+  // Reset messages when market changes
+  useEffect(() => {
+    if (prevMarketRef.current !== market) {
+      setMessages([]);
+      setInput("");
+      prevMarketRef.current = market;
+    }
+  }, [market]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const sendMessage = useCallback(async (text: string) => {
+    if (!text.trim() || isStreaming || !accessToken) return;
+
+    const userMsg: ChatMessage = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setIsStreaming(true);
+
+    // Build history from existing messages (last 20 turns)
+    const history = [...messages, userMsg]
+      .slice(-40)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    // Add placeholder assistant message
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/agent/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ market, message: text, history: history.slice(0, -1) }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "요청 실패" }));
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: `오류: ${err.detail || "AI 응답을 받지 못했습니다."}`,
+          };
+          return updated;
+        });
+        setIsStreaming(false);
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) { setIsStreaming(false); return; }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const payload = trimmed.slice(6);
+
+          if (payload === "[DONE]") continue;
+
+          try {
+            const data = JSON.parse(payload);
+            if (data.token) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                updated[updated.length - 1] = { ...last, content: last.content + data.token };
+                return updated;
+              });
+            }
+            if (data.grounding_sources) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                updated[updated.length - 1] = { ...last, sources: data.grounding_sources };
+                return updated;
+              });
+            }
+            if (data.error) {
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                updated[updated.length - 1] = { ...last, content: last.content + `\n\n${data.error}` };
+                return updated;
+              });
+            }
+          } catch {
+            // skip malformed JSON
+          }
+        }
+      }
+    } catch {
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "네트워크 오류가 발생했습니다.",
+        };
+        return updated;
+      });
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [isStreaming, accessToken, messages, market, API_BASE]);
+
+  const handleAnalyze = () => {
+    sendMessage("이 코인의 현재 트렌드, 전망, 커뮤니티 여론을 분석하고 매매 추천을 해주세요.");
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input);
+  };
+
+  return (
+    <div className="panel agent-chat">
+      <div className="agent-chat-header" onClick={() => setIsCollapsed(!isCollapsed)}>
+        <span className="agent-chat-title">AI 에이전트</span>
+        <span className="agent-chat-toggle">{isCollapsed ? "▼" : "▲"}</span>
+      </div>
+      {!isCollapsed && (
+        <div className="agent-chat-body">
+          {messages.length === 0 && !isStreaming && (
+            <div className="agent-chat-empty">
+              <button className="btn btn-accent agent-analyze-btn" onClick={handleAnalyze}>
+                분석 요청
+              </button>
+              <p className="agent-chat-hint">AI에게 이 코인의 분석을 요청하세요</p>
+            </div>
+          )}
+          {messages.length > 0 && (
+            <div className="agent-chat-messages">
+              {messages.map((msg, i) => (
+                <div key={i} className={`agent-msg agent-msg-${msg.role}`}>
+                  <div className="agent-msg-content">
+                    {msg.content}
+                    {msg.role === "assistant" && isStreaming && i === messages.length - 1 && (
+                      <span className="streaming-cursor" />
+                    )}
+                  </div>
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="agent-msg-sources">
+                      {msg.sources.map((s, j) => (
+                        <a key={j} href={s.url} target="_blank" rel="noopener noreferrer" className="agent-source-chip">
+                          {s.title || new URL(s.url).hostname}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+          <form className="agent-input-area" onSubmit={handleSubmit}>
+            <input
+              className="agent-input"
+              type="text"
+              placeholder="질문을 입력하세요..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={isStreaming}
+            />
+            <button className="btn btn-accent agent-send-btn" type="submit" disabled={isStreaming || !input.trim()}>
+              전송
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── ExchangeDetail ─────────────────────────────── */
 
 function ExchangeDetail({
@@ -653,7 +898,7 @@ function ExchangeDetail({
   ticker: MarketItem | null;
   lastMessage: { type: string; data: unknown } | null;
 }) {
-  const { api } = useAuthContext();
+  const { api, auth } = useAuthContext();
   const { get } = api;
   const [tf, setTf] = useState<Timeframe | DailyTf>(15);
   const [position, setPosition] = useState<PositionInfo | null>(null);
@@ -892,6 +1137,11 @@ function ExchangeDetail({
       {/* Order Panel */}
       <div style={{ marginTop: 16 }}>
         <OrderPanel market={market} price={curPrice} position={position} cashBalance={cashBalance} />
+      </div>
+
+      {/* AI Agent Chat */}
+      <div style={{ marginTop: 16 }}>
+        <AgentChat market={market} accessToken={auth.accessToken} />
       </div>
     </div>
   );
