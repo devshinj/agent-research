@@ -29,13 +29,15 @@ class Trainer:
         self._lookahead = lookahead_minutes
         self._threshold = threshold_pct
 
+    def update_threshold(self, value: float) -> None:
+        self._threshold = value
+
     def _create_labels(self, df: pd.DataFrame) -> pd.Series:
         future_return = (
             df["close"].shift(-self._lookahead) / df["close"] - 1
         ) * 100
-        labels = pd.Series(1, index=df.index)  # default HOLD=1
-        labels[future_return > self._threshold] = 2   # BUY
-        labels[future_return < -self._threshold] = 0  # SELL
+        labels = pd.Series(0, index=df.index)  # default NOT_BUY=0
+        labels[future_return > self._threshold] = 1  # BUY
         return labels
 
     def train(self, market: str, candle_df: pd.DataFrame) -> dict[str, Any]:

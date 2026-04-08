@@ -42,6 +42,22 @@ def test_trainer_saves_metadata(tmp_path):
     assert meta_path.exists()
 
 
+def test_trainer_creates_binary_labels(tmp_path):
+    """_create_labels produces only 0 (NOT_BUY) and 1 (BUY), no label=2."""
+    df = make_training_data()
+    feature_builder = FeatureBuilder()
+    trainer = Trainer(feature_builder, str(tmp_path), 5, 0.3)
+    labels = trainer._create_labels(df)
+    assert set(labels.dropna().unique()).issubset({0, 1})
+
+
+def test_trainer_update_threshold(tmp_path):
+    feature_builder = FeatureBuilder()
+    trainer = Trainer(feature_builder, str(tmp_path), 5, 0.3)
+    trainer.update_threshold(0.5)
+    assert trainer._threshold == 0.5
+
+
 def test_trainer_with_insufficient_data(tmp_path):
     df = make_training_data(20)
     feature_builder = FeatureBuilder()
