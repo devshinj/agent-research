@@ -2192,3 +2192,70 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 3px;
   font-size: 0.8rem;
 }
+
+/* ── Ranking Page ── */
+.ranking-page { padding: 0; }
+.ranking-page .page-header { margin-bottom: 1.5rem; }
+.ranking-page .page-header h2 { font-size: 1.25rem; font-weight: 600; }
+
+.ranking-my-summary {
+  display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;
+}
+.my-rank-card {
+  background: var(--card-bg, #1a1a2e);
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 8px; padding: 1rem 1.5rem;
+  display: flex; flex-direction: column; gap: 0.25rem; min-width: 140px;
+}
+.my-rank-label { font-size: 0.75rem; color: var(--text-muted, #888); text-transform: uppercase; }
+.my-rank-value { font-size: 1.5rem; font-weight: 700; }
+.my-rank-total { font-size: 0.85rem; color: var(--text-muted, #888); }
+
+.ranking-table-wrap { overflow-x: auto; }
+.ranking-table {
+  width: 100%; border-collapse: collapse; font-size: 0.9rem;
+}
+.ranking-table th {
+  text-align: left; padding: 0.75rem 1rem;
+  border-bottom: 2px solid var(--border, #2a2a4a);
+  font-size: 0.75rem; text-transform: uppercase;
+  color: var(--text-muted, #888); font-weight: 600;
+}
+.ranking-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border, #2a2a4a);
+  vertical-align: middle;
+}
+.ranking-table tbody tr:hover {
+  background: rgba(255,255,255,0.03);
+}
+
+/* Me row highlight */
+.ranking-row-me {
+  background: rgba(99, 102, 241, 0.08) !important;
+}
+.ranking-row-me td { font-weight: 600; }
+.me-bar {
+  display: inline-block; width: 3px; height: 1.2em;
+  background: #6366f1; border-radius: 2px;
+  margin-right: 0.5rem; vertical-align: middle;
+}
+.me-badge {
+  display: inline-block; font-size: 0.65rem;
+  background: #6366f1; color: #fff;
+  border-radius: 4px; padding: 0.1rem 0.4rem;
+  margin-left: 0.5rem; vertical-align: middle; font-weight: 700;
+}
+
+.ranking-rank { white-space: nowrap; font-size: 1rem; }
+.ranking-nickname { font-weight: 500; }
+.ranking-return { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.positive { color: #22c55e; }
+.negative { color: #ef4444; }
+
+.ranking-sparkline { width: 80px; }
+.ranking-empty {
+  text-align: center; padding: 3rem 1rem;
+  color: var(--text-muted, #888); font-style: italic;
+}
