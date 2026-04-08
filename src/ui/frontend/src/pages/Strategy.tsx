@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useApi } from "../hooks/useApi";
+import { useAuthContext } from "../context/AuthContext";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -102,7 +102,8 @@ type SortKey = "volume_krw" | "volatility_pct" | "score";
 type SortDir = "asc" | "desc";
 
 export default function Strategy() {
-  const { get, patchJson } = useApi();
+  const { api } = useAuthContext();
+  const { get, patchJson } = api;
   const [screening, setScreening] = useState<ScreeningResult[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
