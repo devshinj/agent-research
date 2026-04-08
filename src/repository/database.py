@@ -116,6 +116,19 @@ CREATE TABLE IF NOT EXISTS user_settings (
     max_daily_loss_pct   TEXT NOT NULL DEFAULT '0.05',
     trading_enabled      INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS pending_orders (
+    id          TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    market      TEXT NOT NULL,
+    side        TEXT NOT NULL DEFAULT 'BUY',
+    limit_price TEXT NOT NULL,
+    amount_krw  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'PENDING',
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL,
+    filled_at   INTEGER
+);
 """
 
 
@@ -293,7 +306,7 @@ class Database:
     async def reset_trading_data(self, user_id: int | None = None) -> None:
         """Delete all trading data. Preserves candles and screening_log."""
         tables = ["orders", "positions", "account_state",
-                  "daily_summary", "risk_state", "signals"]
+                  "daily_summary", "risk_state", "signals", "pending_orders"]
         for table in tables:
             if user_id is not None and table != "signals":
                 await self.conn.execute(
