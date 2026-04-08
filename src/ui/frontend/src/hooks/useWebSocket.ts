@@ -5,29 +5,36 @@ interface WSMessage {
   data: Record<string, unknown>;
 }
 
-export function useWebSocket(url: string) {
+export function useWebSocket(url: string, token: string | null) {
   const [lastMessage, setLastMessage] = useState<WSMessage | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+    if (!token) return;
+    const wsUrl = `${url}?token=${token}`;
 
-    ws.onopen = () => setIsConnected(true);
-    ws.onclose = () => {
-      setIsConnected(false);
-      setTimeout(() => {
-        wsRef.current = new WebSocket(url);
-      }, 3000);
-    };
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data) as WSMessage;
-      setLastMessage(msg);
+    const connect = () => {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => setIsConnected(true);
+      ws.onclose = () => {
+        setIsConnected(false);
+        setTimeout(connect, 3000);
+      };
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data) as WSMessage;
+        setLastMessage(msg);
+      };
     };
 
-    return () => ws.close();
-  }, [url]);
+    connect();
+
+    return () => {
+      wsRef.current?.close();
+    };
+  }, [url, token]);
 
   return { lastMessage, isConnected };
 }

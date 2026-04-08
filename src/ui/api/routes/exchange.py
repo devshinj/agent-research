@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+
+from src.ui.api.auth import get_current_user
 
 router = APIRouter()
 
@@ -28,7 +30,9 @@ class ExitOrdersRequest(BaseModel):
 
 
 @router.get("/markets")
-async def get_exchange_markets(request: Request) -> list[dict]:
+async def get_exchange_markets(
+    request: Request, user: dict = Depends(get_current_user)
+) -> list[dict]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
@@ -55,21 +59,32 @@ async def get_exchange_markets(request: Request) -> list[dict]:
 
 
 @router.post("/buy")
-async def manual_buy(request: Request, body: BuyRequest) -> dict:
+async def manual_buy(
+    request: Request, body: BuyRequest, user: dict = Depends(get_current_user)
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"success": False, "error": "App not running"}
+
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"success": False, "error": "User account not found"}
+
+    risk_manager = app.user_risk.get(user_id)
+    if risk_manager is None:
+        return {"success": False, "error": "Risk manager not found"}
 
     amount = Decimal(body.amount_krw)
 
     if amount < app.settings.paper_trading.min_order_krw:
         return {"success": False, "error": f"최소 주문 금액({app.settings.paper_trading.min_order_krw}원) 미달"}
 
-    existing = app.account.positions.get(body.market)
-    if existing is None and len(app.account.positions) >= app.settings.paper_trading.max_open_positions:
+    existing = account.positions.get(body.market)
+    if existing is None and len(account.positions) >= app.settings.paper_trading.max_open_positions:
         return {"success": False, "error": "포지션 한도 도달"}
 
-    safe_max = app.paper_engine.safe_buy_amount(app.account.cash_balance)
+    safe_max = app.paper_engine.safe_buy_amount(account.cash_balance)
     if amount > safe_max:
         return {"success": False, "error": f"잔고 부족 (수수료 포함 최대 {safe_max:,.0f}원)"}
 
@@ -81,12 +96,12 @@ async def manual_buy(request: Request, body: BuyRequest) -> dict:
         price = tickers[0]["price"]
 
     order = app.paper_engine.execute_buy(
-        app.account, body.market, price, amount, 0.0, reason="MANUAL",
+        account, body.market, price, amount, 0.0, reason="MANUAL",
     )
-    await app.order_repo.save(order)
-    app.risk_manager.record_trade()
-    await app._save_state()
-    app._ws_outbox.append({
+    await app.order_repo.save(order, user_id)
+    risk_manager.record_trade()
+    await app._save_user_state(user_id)
+    app._push_ws_message(user_id, {
         "type": "order_filled",
         "data": {
             "market": order.market,
@@ -96,7 +111,7 @@ async def manual_buy(request: Request, body: BuyRequest) -> dict:
         },
     })
 
-    pos = app.account.positions.get(body.market)
+    pos = account.positions.get(body.market)
     return {
         "success": True,
         "order": {
@@ -113,15 +128,26 @@ async def manual_buy(request: Request, body: BuyRequest) -> dict:
 
 
 @router.post("/sell")
-async def manual_sell(request: Request, body: SellRequest) -> dict:
+async def manual_sell(
+    request: Request, body: SellRequest, user: dict = Depends(get_current_user)
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"success": False, "error": "App not running"}
 
-    if body.market not in app.account.positions:
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"success": False, "error": "User account not found"}
+
+    risk_manager = app.user_risk.get(user_id)
+    if risk_manager is None:
+        return {"success": False, "error": "Risk manager not found"}
+
+    if body.market not in account.positions:
         return {"success": False, "error": "보유하지 않은 코인입니다"}
 
-    position = app.account.positions[body.market]
+    position = account.positions[body.market]
     entry_price = position.entry_price
     quantity = position.quantity
     fraction = Decimal(body.fraction)
@@ -134,18 +160,18 @@ async def manual_sell(request: Request, body: SellRequest) -> dict:
         price = tickers[0]["price"]
 
     if fraction >= Decimal("1"):
-        order = app.paper_engine.execute_sell(app.account, body.market, price, "MANUAL")
+        order = app.paper_engine.execute_sell(account, body.market, price, "MANUAL")
     else:
         order = app.paper_engine.execute_partial_sell(
-            app.account, body.market, price, fraction, reason="MANUAL",
+            account, body.market, price, fraction, reason="MANUAL",
         )
 
-    await app.order_repo.save(order)
-    app.risk_manager.record_trade()
+    await app.order_repo.save(order, user_id)
+    risk_manager.record_trade()
     assert order.fill_price is not None
-    app._record_trade_result(entry_price, order.fill_price, quantity if fraction >= Decimal("1") else order.quantity)
-    await app._save_state()
-    app._ws_outbox.append({
+    app._record_trade_result_for_user(user_id, entry_price, order.fill_price, quantity if fraction >= Decimal("1") else order.quantity)
+    await app._save_user_state(user_id)
+    app._push_ws_message(user_id, {
         "type": "order_filled",
         "data": {
             "market": order.market,
@@ -155,7 +181,7 @@ async def manual_sell(request: Request, body: SellRequest) -> dict:
         },
     })
 
-    pos = app.account.positions.get(body.market)
+    pos = account.positions.get(body.market)
     return {
         "success": True,
         "order": {
@@ -172,50 +198,70 @@ async def manual_sell(request: Request, body: SellRequest) -> dict:
 
 
 @router.patch("/position/{market}/mode")
-async def update_position_mode(request: Request, market: str, body: ModeRequest) -> dict:
+async def update_position_mode(
+    request: Request, market: str, body: ModeRequest, user: dict = Depends(get_current_user)
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"success": False, "error": "App not running"}
 
-    if market not in app.account.positions:
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"success": False, "error": "User account not found"}
+
+    if market not in account.positions:
         return {"success": False, "error": "보유하지 않은 코인입니다"}
 
     if body.trade_mode not in ("AUTO", "MANUAL"):
         return {"success": False, "error": "유효하지 않은 모드"}
 
-    position = app.account.positions[market]
+    position = account.positions[market]
     position.trade_mode = body.trade_mode
 
     if body.trade_mode == "AUTO":
         position.stop_loss_price = None
         position.take_profit_price = None
 
-    await app._save_state()
+    await app._save_user_state(user_id)
     return {"success": True, "position": _serialize_position(position)}
 
 
 @router.patch("/position/{market}/exit-orders")
-async def update_exit_orders(request: Request, market: str, body: ExitOrdersRequest) -> dict:
+async def update_exit_orders(
+    request: Request, market: str, body: ExitOrdersRequest, user: dict = Depends(get_current_user)
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"success": False, "error": "App not running"}
 
-    if market not in app.account.positions:
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"success": False, "error": "User account not found"}
+
+    if market not in account.positions:
         return {"success": False, "error": "보유하지 않은 코인입니다"}
 
-    position = app.account.positions[market]
+    position = account.positions[market]
     position.stop_loss_price = Decimal(body.stop_loss_price) if body.stop_loss_price else None
     position.take_profit_price = Decimal(body.take_profit_price) if body.take_profit_price else None
-    await app._save_state()
+    await app._save_user_state(user_id)
     return {"success": True, "position": _serialize_position(position)}
 
 
 @router.get("/max-buy-amount")
-async def max_buy_amount(request: Request) -> dict:
+async def max_buy_amount(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"amount": "0"}
-    safe = app.paper_engine.safe_buy_amount(app.account.cash_balance)
+    user_id = user["id"]
+    account = app.user_accounts.get(user_id)
+    if account is None:
+        return {"amount": "0"}
+    safe = app.paper_engine.safe_buy_amount(account.cash_balance)
     return {"amount": str(safe)}
 
 

@@ -8,8 +8,10 @@ import {
   type CandlestickData,
   type HistogramData,
 } from "lightweight-charts";
-import { useApi } from "../hooks/useApi";
+import { useAuthContext } from "../context/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
+
+const WS_BASE = import.meta.env.VITE_WS_URL || `ws://${window.location.host}`;
 
 /* ── Types ──────────────────────────────────────── */
 
@@ -383,7 +385,8 @@ function OrderPanel({
   position: PositionInfo | null;
   cashBalance: string;
 }) {
-  const { postJson, patchJson, get } = useApi();
+  const { api } = useAuthContext();
+  const { postJson, patchJson, get } = api;
   const [tab, setTab] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("");
   const [result, setResult] = useState<{ type: "success" | "error"; msg: string } | null>(null);
@@ -650,7 +653,8 @@ function ExchangeDetail({
   ticker: MarketItem | null;
   lastMessage: { type: string; data: unknown } | null;
 }) {
-  const { get } = useApi();
+  const { api } = useAuthContext();
+  const { get } = api;
   const [tf, setTf] = useState<Timeframe | DailyTf>(15);
   const [position, setPosition] = useState<PositionInfo | null>(null);
   const [cashBalance, setCashBalance] = useState("0");
@@ -896,8 +900,9 @@ function ExchangeDetail({
 /* ── Main Exchange Component ────────────────────── */
 
 export default function Exchange() {
-  const { get } = useApi();
-  const { lastMessage } = useWebSocket("ws://localhost:8000/ws/live");
+  const { api, auth } = useAuthContext();
+  const { get } = api;
+  const { lastMessage } = useWebSocket(`${WS_BASE}/ws/live`, auth.accessToken);
   const [markets, setMarkets] = useState<MarketItem[]>([]);
   const [search, setSearch] = useState("");
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);

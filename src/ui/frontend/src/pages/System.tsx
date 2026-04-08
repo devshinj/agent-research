@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useApi } from "../hooks/useApi";
+import { useAuthContext } from "../context/AuthContext";
 
 type SystemStatus = "running" | "paused" | "unknown";
 
@@ -12,6 +12,21 @@ interface SystemConfig {
   paper_trading: { initial_balance: number; fee_rate: number; slippage_rate: number; min_order_krw: number };
   collector: { candle_timeframe: number; max_candles_per_market: number; market_refresh_interval_min: number };
   data: { db_path: string; model_dir: string; stale_candle_days: number; stale_model_days: number; stale_order_days: number };
+}
+
+interface UserItem {
+  id: number;
+  email: string;
+  nickname: string;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface UserSettings {
+  stop_loss_pct: number;
+  take_profit_pct: number;
+  trailing_stop_pct: number;
 }
 
 const INFO_FIELDS: { section: keyof SystemConfig; label: string; fields: { key: string; label: string }[] }[] = [
@@ -44,8 +59,186 @@ const INFO_FIELDS: { section: keyof SystemConfig; label: string; fields: { key: 
   },
 ];
 
+function AdminUserPanel() {
+  const { api } = useAuthContext();
+  const { get, patchJson, postJson } = api;
+  const [users, setUsers] = useState<UserItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserItem | null>(null);
+  const [settings, setSettings] = useState<UserSettings>({ stop_loss_pct: 0, take_profit_pct: 0, trailing_stop_pct: 0 });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
+
+  const fetchUsers = () => {
+    get<UserItem[]>("/api/admin/users").then(setUsers).catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleToggleActive = async (user: UserItem) => {
+    setLoading(true);
+    try {
+      await patchJson(`/api/admin/users/${user.id}`, { is_active: !user.is_active });
+      fetchUsers();
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
+  };
+
+  const openSettings = async (user: UserItem) => {
+    setEditingUser(user);
+    setSettingsError("");
+    try {
+      const s = await get<UserSettings>(`/api/admin/users/${user.id}/settings`);
+      setSettings(s);
+    } catch {
+      setSettings({ stop_loss_pct: 0, take_profit_pct: 0, trailing_stop_pct: 0 });
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    if (!editingUser) return;
+    setSettingsLoading(true);
+    setSettingsError("");
+    try {
+      await patchJson(`/api/admin/users/${editingUser.id}/settings`, settings);
+      setEditingUser(null);
+    } catch (err: any) {
+      setSettingsError(err.message || "저장 실패");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h3>사용자 관리</h3>
+        <span className="badge info">{users.length}명</span>
+      </div>
+      <div className="panel-body" style={{ padding: 0 }}>
+        {users.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-text">사용자 없음</div>
+          </div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>이메일</th>
+                <th>닉네임</th>
+                <th style={{ textAlign: "center" }}>권한</th>
+                <th style={{ textAlign: "center" }}>상태</th>
+                <th style={{ textAlign: "center" }}>가입일</th>
+                <th style={{ textAlign: "center" }}>작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>{u.id}</td>
+                  <td>{u.email}</td>
+                  <td style={{ fontWeight: 600 }}>{u.nickname}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <span className={`badge ${u.is_admin ? "profit" : "neutral"}`} style={{ fontSize: 10 }}>
+                      {u.is_admin ? "관리자" : "일반"}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <span className={`badge ${u.is_active ? "info" : "loss"}`} style={{ fontSize: 10 }}>
+                      {u.is_active ? "활성" : "비활성"}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
+                    {u.created_at ? new Date(u.created_at).toLocaleDateString("ko-KR") : "-"}
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                      <button
+                        className={`btn btn-sm ${u.is_active ? "btn-ghost" : "btn-primary"}`}
+                        style={{ fontSize: 11, padding: "3px 10px" }}
+                        onClick={() => handleToggleActive(u)}
+                        disabled={loading}
+                      >
+                        {u.is_active ? "비활성화" : "활성화"}
+                      </button>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        style={{ fontSize: 11, padding: "3px 10px" }}
+                        onClick={() => openSettings(u)}
+                      >
+                        설정
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Settings Modal */}
+      {editingUser && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => setEditingUser(null)}
+        >
+          <div
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 32, maxWidth: 420, width: "90%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 4px", color: "var(--text)" }}>사용자 설정</h3>
+            <p style={{ margin: "0 0 20px", fontSize: 13, color: "var(--text-dim)" }}>{editingUser.nickname} ({editingUser.email})</p>
+            {settingsError && (
+              <div className="auth-error" style={{ marginBottom: 12 }}>{settingsError}</div>
+            )}
+            <div className="form-group">
+              <label>손절 비율 (%)</label>
+              <input
+                type="number"
+                step="0.1"
+                value={settings.stop_loss_pct}
+                onChange={e => setSettings(s => ({ ...s, stop_loss_pct: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="form-group">
+              <label>익절 비율 (%)</label>
+              <input
+                type="number"
+                step="0.1"
+                value={settings.take_profit_pct}
+                onChange={e => setSettings(s => ({ ...s, take_profit_pct: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="form-group">
+              <label>트레일링 스탑 비율 (%)</label>
+              <input
+                type="number"
+                step="0.1"
+                value={settings.trailing_stop_pct}
+                onChange={e => setSettings(s => ({ ...s, trailing_stop_pct: Number(e.target.value) }))}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 20 }}>
+              <button className="btn btn-ghost" onClick={() => setEditingUser(null)}>취소</button>
+              <button className="btn btn-primary" onClick={handleSaveSettings} disabled={settingsLoading}>
+                {settingsLoading ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function System() {
-  const { get, post, postJson } = useApi();
+  const { api, auth } = useAuthContext();
+  const { get, post, postJson } = api;
   const [status, setStatus] = useState<SystemStatus>("unknown");
   const [tradingEnabled, setTradingEnabled] = useState(false);
   const [config, setConfig] = useState<SystemConfig | null>(null);
@@ -165,6 +358,9 @@ export default function System() {
           </button>
         </div>
       </div>
+
+      {/* ── Admin User Management ────────── */}
+      {auth.isAdmin && <AdminUserPanel />}
 
       {/* ── System Info ────────────────── */}
       <div className="panel">

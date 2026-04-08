@@ -9,3 +9,8 @@ build/
 .pytest_cache/
 .ruff_cache/
 .worktrees/
+
+# Deploy secrets
+deploy/.env
+deploy/ssl/*.pem
+*.tar.gz

@@ -5,13 +5,17 @@ import time
 from datetime import UTC, datetime, timezone, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+
+from src.ui.api.auth import get_current_user
 
 router = APIRouter()
 
 
 @router.get("/screening")
-async def get_screening(request: Request) -> list[dict[str, Any]]:
+async def get_screening(
+    request: Request, user: dict = Depends(get_current_user)
+) -> list[dict[str, Any]]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return []
@@ -36,7 +40,10 @@ async def get_screening(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/signals")
 async def get_signals(
-    request: Request, limit: int = 50, include_hold: bool = False,
+    request: Request,
+    limit: int = 50,
+    include_hold: bool = False,
+    user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     app = getattr(request.app.state, "app", None)
     if app is None:
@@ -58,7 +65,9 @@ async def get_signals(
 
 
 @router.get("/model-status")
-async def get_model_status(request: Request) -> dict[str, Any]:
+async def get_model_status(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"models": {}, "last_retrain": None, "next_retrain_hours": None}

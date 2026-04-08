@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, Fragment } from "react";
-import { useApi } from "../hooks/useApi";
+import { useAuthContext } from "../context/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
+
+const WS_BASE = import.meta.env.VITE_WS_URL || `ws://${window.location.host}`;
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -112,8 +114,9 @@ const pnlClass = (val: string) => {
 /* ── Component ──────────────────────────────────── */
 
 export default function Dashboard() {
-  const { get, patchJson } = useApi();
-  const { lastMessage } = useWebSocket("ws://localhost:8000/ws/live");
+  const { api, auth } = useAuthContext();
+  const { get, patchJson } = api;
+  const { lastMessage } = useWebSocket(`${WS_BASE}/ws/live`, auth.accessToken);
 
   // Core state
   const [summary, setSummary] = useState<Summary | null>(null);

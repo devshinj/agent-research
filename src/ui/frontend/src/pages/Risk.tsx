@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useApi } from "../hooks/useApi";
+import { useAuthContext } from "../context/AuthContext";
 
 interface RiskStatus {
   circuit_breaker_active: boolean;
@@ -58,7 +58,8 @@ const SLIDERS: SliderDef[] = [
 ];
 
 export default function Risk() {
-  const { get, patchJson } = useApi();
+  const { api } = useAuthContext();
+  const { get, patchJson } = api;
   const [status, setStatus] = useState<RiskStatus | null>(null);
   const [config, setConfig] = useState<ConfigValues | null>(null);
   const [form, setForm] = useState<Record<string, Record<string, number>>>({});

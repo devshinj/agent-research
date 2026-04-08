@@ -1,6 +1,7 @@
 # src/config/settings.py
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -76,6 +77,12 @@ class DataConfig:
 
 
 @dataclass(frozen=True)
+class AuthConfig:
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+
+
+@dataclass(frozen=True)
 class Settings:
     paper_trading: PaperTradingConfig
     risk: RiskConfig
@@ -83,7 +90,8 @@ class Settings:
     strategy: StrategyConfig
     collector: CollectorConfig
     data: DataConfig
-    entry_analyzer: EntryAnalyzerConfig = EntryAnalyzerConfig()
+    entry_analyzer: EntryAnalyzerConfig = dataclasses.field(default_factory=EntryAnalyzerConfig)
+    auth: AuthConfig = dataclasses.field(default_factory=AuthConfig)
 
     @staticmethod
     def from_yaml(path: Path) -> Settings:
@@ -139,6 +147,10 @@ class Settings:
             entry_analyzer=EntryAnalyzerConfig(
                 min_entry_score=Decimal(str(raw.get("entry_analyzer", {}).get("min_entry_score", "0.5"))),
                 price_lookback_candles=int(raw.get("entry_analyzer", {}).get("price_lookback_candles", 60)),
+            ),
+            auth=AuthConfig(
+                access_token_expire_minutes=int(raw.get("auth", {}).get("access_token_expire_minutes", 30)),
+                refresh_token_expire_days=int(raw.get("auth", {}).get("refresh_token_expire_days", 7)),
             ),
             data=DataConfig(
                 db_path=str(raw["data"]["db_path"]),
@@ -196,6 +208,10 @@ class Settings:
             "entry_analyzer": {
                 "min_entry_score": float(self.entry_analyzer.min_entry_score),
                 "price_lookback_candles": self.entry_analyzer.price_lookback_candles,
+            },
+            "auth": {
+                "access_token_expire_minutes": self.auth.access_token_expire_minutes,
+                "refresh_token_expire_days": self.auth.refresh_token_expire_days,
             },
             "data": {
                 "db_path": self.data.db_path,

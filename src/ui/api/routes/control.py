@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.config.settings import Settings
+from src.ui.api.auth import get_current_user, require_admin
 
 router = APIRouter()
 
@@ -14,7 +15,7 @@ _CONFIG_PATH = Path("config/settings.yaml")
 
 
 @router.post("/pause")
-async def pause(request: Request) -> dict[str, str]:
+async def pause(request: Request, _: dict = Depends(require_admin)) -> dict[str, str]:
     app = getattr(request.app.state, "app", None)
     if app is not None:
         app.paused = True
@@ -22,7 +23,7 @@ async def pause(request: Request) -> dict[str, str]:
 
 
 @router.post("/resume")
-async def resume(request: Request) -> dict[str, str]:
+async def resume(request: Request, _: dict = Depends(require_admin)) -> dict[str, str]:
     app = getattr(request.app.state, "app", None)
     if app is not None:
         app.paused = False
@@ -30,34 +31,46 @@ async def resume(request: Request) -> dict[str, str]:
 
 
 @router.post("/trading/start")
-async def trading_start(request: Request) -> dict[str, str]:
+async def trading_start(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, object]:
     app = getattr(request.app.state, "app", None)
-    if app is not None:
-        app.trading_enabled = True
-    return {"status": "trading_started"}
+    if not app:
+        raise HTTPException(status_code=503, detail="Not ready")
+    await app.user_repo.update_settings(user["id"], {"trading_enabled": 1})
+    return {"trading_enabled": True}
 
 
 @router.post("/trading/stop")
-async def trading_stop(request: Request) -> dict[str, str]:
+async def trading_stop(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, object]:
     app = getattr(request.app.state, "app", None)
-    if app is not None:
-        app.trading_enabled = False
-    return {"status": "trading_stopped"}
+    if not app:
+        raise HTTPException(status_code=503, detail="Not ready")
+    await app.user_repo.update_settings(user["id"], {"trading_enabled": 0})
+    return {"trading_enabled": False}
 
 
 @router.get("/status")
-async def get_status(request: Request) -> dict[str, object]:
+async def get_status(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, object]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         return {"paused": True, "trading_enabled": False}
+    settings = await app.user_repo.get_settings(user["id"])
+    trading_enabled = bool(settings.get("trading_enabled", 0))
     return {
         "paused": app.paused,
-        "trading_enabled": app.trading_enabled,
+        "trading_enabled": trading_enabled,
     }
 
 
 @router.get("/config")
-async def get_config(request: Request) -> dict[str, Any]:
+async def get_config(
+    request: Request, _: dict = Depends(require_admin)
+) -> dict[str, Any]:
     app = getattr(request.app.state, "app", None)
     if app is not None:
         result: dict[str, Any] = app.settings.to_dict()
@@ -67,7 +80,9 @@ async def get_config(request: Request) -> dict[str, Any]:
 
 
 @router.post("/reset")
-async def reset(request: Request) -> dict[str, str]:
+async def reset(
+    request: Request, _: dict = Depends(require_admin)
+) -> dict[str, str]:
     app = getattr(request.app.state, "app", None)
 
     # Reset app state using current settings (don't overwrite YAML)
@@ -78,7 +93,9 @@ async def reset(request: Request) -> dict[str, str]:
 
 
 @router.patch("/config")
-async def patch_config(request: Request) -> dict[str, Any]:
+async def patch_config(
+    request: Request, _: dict = Depends(require_admin)
+) -> dict[str, Any]:
     app = getattr(request.app.state, "app", None)
     if app is None:
         raise HTTPException(status_code=503, detail="App not initialized")
@@ -99,6 +116,26 @@ async def patch_config(request: Request) -> dict[str, Any]:
         "config": app.settings.to_dict(),
     }
     return result
+
+
+@router.patch("/user-config")
+async def patch_user_config(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
+    app = getattr(request.app.state, "app", None)
+    if not app:
+        raise HTTPException(status_code=503, detail="Not ready")
+    body = await request.json()
+    allowed = {
+        "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
+        "max_daily_loss_pct", "max_position_pct", "max_open_positions",
+    }
+    patches = {k: v for k, v in body.items() if k in allowed}
+    if not patches:
+        raise HTTPException(status_code=400, detail="No valid fields")
+    await app.user_repo.update_settings(user["id"], patches)
+    await app.load_user(user["id"])
+    return {"updated": list(patches.keys())}
 
 
 def _merge_yaml(path: Path, patch: dict[str, Any]) -> None:

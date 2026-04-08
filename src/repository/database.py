@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS screening_log (
 );
 
 CREATE TABLE IF NOT EXISTS account_state (
-    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id       INTEGER PRIMARY KEY,
     cash_balance  TEXT NOT NULL,
     updated_at    INTEGER NOT NULL
 );
@@ -74,13 +74,13 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 
 CREATE TABLE IF NOT EXISTS risk_state (
-    id                  INTEGER PRIMARY KEY CHECK (id = 1),
-    consecutive_losses  INTEGER NOT NULL,
-    cooldown_until      INTEGER NOT NULL,
-    daily_loss          TEXT NOT NULL,
-    daily_trades        INTEGER NOT NULL,
-    current_day         TEXT NOT NULL,
-    updated_at          INTEGER NOT NULL
+    user_id              INTEGER PRIMARY KEY,
+    consecutive_losses   INTEGER NOT NULL,
+    cooldown_until       INTEGER NOT NULL,
+    daily_loss           TEXT NOT NULL,
+    daily_trades         INTEGER NOT NULL,
+    current_day          TEXT NOT NULL,
+    updated_at           INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signals (
@@ -91,6 +91,28 @@ CREATE TABLE IF NOT EXISTS signals (
     timestamp   INTEGER NOT NULL,
     outcome     TEXT,
     basis       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    nickname      TEXT NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id              INTEGER PRIMARY KEY REFERENCES users(id),
+    initial_balance      TEXT NOT NULL DEFAULT '5000000',
+    max_position_pct     TEXT NOT NULL DEFAULT '0.25',
+    max_open_positions   INTEGER NOT NULL DEFAULT 4,
+    stop_loss_pct        TEXT NOT NULL DEFAULT '0.03',
+    take_profit_pct      TEXT NOT NULL DEFAULT '0.08',
+    trailing_stop_pct    TEXT NOT NULL DEFAULT '0.015',
+    max_daily_loss_pct   TEXT NOT NULL DEFAULT '0.05',
+    trading_enabled      INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -136,6 +158,71 @@ class Database:
             if col_name not in sig_cols:
                 await self._conn.execute(sql)
 
+        # Multi-user migration: add user_id to tenant tables
+        tenant_tables = {
+            "orders": "user_id INTEGER NOT NULL DEFAULT 1",
+            "positions": "user_id INTEGER NOT NULL DEFAULT 1",
+            "account_state": "user_id INTEGER NOT NULL DEFAULT 1",
+            "daily_summary": "user_id INTEGER NOT NULL DEFAULT 1",
+            "risk_state": "user_id INTEGER NOT NULL DEFAULT 1",
+        }
+        for table, col_def in tenant_tables.items():
+            cursor = await self._conn.execute(f"PRAGMA table_info({table})")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "user_id" not in columns:
+                await self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {col_def}"
+                )
+
+        # Remove CHECK(id=1) singleton constraint from account_state and risk_state
+        # by recreating tables without the constraint (SQLite doesn't support DROP CHECK)
+        cursor = await self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='account_state'"
+        )
+        row = await cursor.fetchone()
+        if row and "CHECK" in row[0]:
+            await self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS account_state_new (
+                    user_id       INTEGER PRIMARY KEY,
+                    cash_balance  TEXT NOT NULL,
+                    updated_at    INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO account_state_new (user_id, cash_balance, updated_at)
+                    SELECT user_id, cash_balance, updated_at FROM account_state;
+                DROP TABLE account_state;
+                ALTER TABLE account_state_new RENAME TO account_state;
+            """)
+
+        cursor = await self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='risk_state'"
+        )
+        row = await cursor.fetchone()
+        if row and "CHECK" in row[0]:
+            await self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS risk_state_new (
+                    user_id              INTEGER PRIMARY KEY,
+                    consecutive_losses   INTEGER NOT NULL,
+                    cooldown_until       INTEGER NOT NULL,
+                    daily_loss           TEXT NOT NULL,
+                    daily_trades         INTEGER NOT NULL,
+                    current_day          TEXT NOT NULL,
+                    updated_at           INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO risk_state_new
+                    (user_id, consecutive_losses, cooldown_until, daily_loss,
+                     daily_trades, current_day, updated_at)
+                    SELECT user_id, consecutive_losses, cooldown_until, daily_loss,
+                           daily_trades, current_day, updated_at
+                    FROM risk_state;
+                DROP TABLE risk_state;
+                ALTER TABLE risk_state_new RENAME TO risk_state;
+            """)
+
+        await self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_summary_user_date"
+            " ON daily_summary(user_id, date)"
+        )
+
     @property
     def conn(self) -> aiosqlite.Connection:
         if self._conn is None:
@@ -149,16 +236,17 @@ class Database:
         await self.conn.commit()
         return cursor.rowcount
 
-    async def reset_trading_data(self) -> None:
+    async def reset_trading_data(self, user_id: int | None = None) -> None:
         """Delete all trading data. Preserves candles and screening_log."""
-        await self.conn.executescript(
-            "DELETE FROM orders;"
-            "DELETE FROM positions;"
-            "DELETE FROM account_state;"
-            "DELETE FROM daily_summary;"
-            "DELETE FROM risk_state;"
-            "DELETE FROM signals;"
-        )
+        tables = ["orders", "positions", "account_state",
+                  "daily_summary", "risk_state", "signals"]
+        for table in tables:
+            if user_id is not None and table != "signals":
+                await self.conn.execute(
+                    f"DELETE FROM {table} WHERE user_id = ?", (user_id,)
+                )
+            else:
+                await self.conn.execute(f"DELETE FROM {table}")
         await self.conn.commit()
 
     async def close(self) -> None:
