@@ -93,7 +93,7 @@ const STRATEGY_FIELDS: SettingFieldDef[] = [
   { section: "screening", key: "max_volatility_pct", label: "최대 변동성", desc: "변동성이 이 값을 초과하는 코인은 위험이 높아 제외됩니다", min: 5, max: 50, step: 1, format: (v) => `${v}%`, hotReload: true },
   { section: "screening", key: "max_coins", label: "최대 코인 수", desc: "스크리닝 결과에서 상위 N개 코인만 선택합니다", min: 1, max: 20, step: 1, format: (v) => `${v}개`, hotReload: true },
   { section: "strategy", key: "min_confidence", label: "최소 신뢰도", desc: "ML 모델의 예측 신뢰도가 이 값 이하이면 HOLD로 처리합니다", min: 0.3, max: 0.95, step: 0.05, format: (v) => `${(v * 100).toFixed(0)}%`, hotReload: true },
-  { section: "strategy", key: "threshold_pct", label: "분류 임계값", desc: "라벨링 시 ±이 비율 이상 변동해야 BUY/SELL로 분류합니다", min: 0.1, max: 1.0, step: 0.05, format: (v) => `±${v}%`, hotReload: false },
+  { section: "strategy", key: "threshold_pct", label: "분류 임계값", desc: "이 비율 이상 상승이 예상되면 BUY로 분류합니다 (변경 시 자동 재학습)", min: 0.1, max: 1.0, step: 0.05, format: (v) => `${v}%`, hotReload: true },
   { section: "strategy", key: "retrain_interval_hours", label: "재학습 주기", desc: "ML 모델을 자동으로 재학습하는 간격입니다", min: 1, max: 24, step: 1, format: (v) => `${v}시간`, hotReload: false },
   { section: "entry_analyzer", key: "min_entry_score", label: "최소 진입 스코어", desc: "가격위치/RSI/추세를 종합한 스코어가 이 값 미만이면 매수를 거부합니다 (0~1)", min: 0.1, max: 0.9, step: 0.05, format: (v) => `${v}`, hotReload: false },
   { section: "entry_analyzer", key: "price_lookback_candles", label: "가격 참조 캔들", desc: "현재 가격의 상대적 위치를 판단할 때 참조하는 최근 캔들 수입니다", min: 20, max: 200, step: 10, format: (v) => `${v}개`, hotReload: false },
@@ -103,7 +103,7 @@ type SortKey = "price" | "volume_krw" | "volatility_pct" | "score";
 type SortDir = "asc" | "desc";
 
 export default function Strategy() {
-  const { api } = useAuthContext();
+  const { auth, api } = useAuthContext();
   const { get, patchJson } = api;
   const [screening, setScreening] = useState<ScreeningResult[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -115,12 +115,15 @@ export default function Strategy() {
   const [form, setForm] = useState<Record<string, Record<string, number>>>({});
   const [saving, setSaving] = useState(false);
   const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null);
+  const [includeHold, setIncludeHold] = useState(false);
+  const [signalPage, setSignalPage] = useState(0);
+  const SIGNALS_PER_PAGE = 10;
 
   const refreshAll = useCallback(() => {
     get<ScreeningResult[]>("/api/strategy/screening").then(setScreening);
-    get<Signal[]>("/api/strategy/signals").then(setSignals);
+    get<Signal[]>(`/api/strategy/signals?include_hold=${includeHold}`).then(setSignals);
     get<ModelStatus>("/api/strategy/model-status").then(setModelStatus);
-  }, [get]);
+  }, [get, includeHold]);
 
   // Initial load + polling every 30s (including model-status for training state)
   useEffect(() => {
@@ -130,6 +133,7 @@ export default function Strategy() {
   }, [refreshAll]);
 
   useEffect(() => {
+    if (!auth.isAdmin) return;
     get<StrategyConfig>("/api/control/config").then((data) => {
       setConfig(data);
       setForm({
@@ -138,7 +142,7 @@ export default function Strategy() {
         entry_analyzer: { min_entry_score: data.entry_analyzer.min_entry_score, price_lookback_candles: data.entry_analyzer.price_lookback_candles },
       });
     });
-  }, [get]);
+  }, [get, auth.isAdmin]);
 
   const handleSlider = (section: string, key: string, value: number) => {
     setForm((prev) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
@@ -280,61 +284,92 @@ export default function Strategy() {
         <div className="panel-header">
           <h3>활성 신호</h3>
           <span className="badge neutral">{signals.length}</span>
+          <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={includeHold}
+              onChange={(e) => { setIncludeHold(e.target.checked); setSignalPage(0); }}
+            />
+            HOLD 포함
+          </label>
         </div>
         {signals.length === 0 ? (
           <div className="panel-body">
             <div className="empty-state">
               <div className="empty-icon">&#9889;</div>
               <div className="empty-text">
-                활성 신호가 없습니다. ML 예측기가 학습된 모델을 기반으로 매수/매도 신호를 생성합니다.
+                활성 신호가 없습니다. 캔들 수집 후 ML 예측이 시작되면 BUY/SELL 신호가 표시됩니다.
               </div>
             </div>
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>시간</th>
-                <th>코인</th>
-                <th>신호</th>
-                <th>신뢰도</th>
-              </tr>
-            </thead>
-            <tbody>
-              {signals.map((s, i) => (
-                <tr
-                  key={i}
-                  className="signal-row"
-                  onMouseEnter={(e) => {
-                    if (s.basis) {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setTooltipSignal({ basis: s.basis, x: rect.left, y: rect.bottom + 4 });
-                    }
-                  }}
-                  onMouseLeave={() => setTooltipSignal(null)}
-                >
-                  <td>{s.created_at}</td>
-                  <td style={{ color: "var(--text)", fontWeight: 600 }}>{s.market}</td>
-                  <td>
-                    <span className={`badge ${s.signal_type === "BUY" ? "profit" : "loss"}`}>
-                      {s.signal_type}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div className="progress-bar" style={{ flex: 1, maxWidth: 80 }}>
-                        <div
-                          className={`fill ${s.confidence >= 0.7 ? "accent" : "warn"}`}
-                          style={{ width: `${s.confidence * 100}%` }}
-                        />
-                      </div>
-                      <span>{(s.confidence * 100).toFixed(0)}%</span>
-                    </div>
-                  </td>
+          <>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>시간</th>
+                  <th>코인</th>
+                  <th>신호</th>
+                  <th>신뢰도</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {signals.slice(signalPage * SIGNALS_PER_PAGE, (signalPage + 1) * SIGNALS_PER_PAGE).map((s, i) => (
+                  <tr
+                    key={i}
+                    className="signal-row"
+                    onMouseEnter={(e) => {
+                      if (s.basis) {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setTooltipSignal({ basis: s.basis, x: rect.left, y: rect.bottom + 4 });
+                      }
+                    }}
+                    onMouseLeave={() => setTooltipSignal(null)}
+                  >
+                    <td>{s.created_at}</td>
+                    <td style={{ color: "var(--text)", fontWeight: 600 }}>{s.market}</td>
+                    <td>
+                      <span className={`badge ${s.signal_type === "BUY" ? "profit" : s.signal_type === "SELL" ? "loss" : "neutral"}`}>
+                        {s.signal_type}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div className="progress-bar" style={{ flex: 1, maxWidth: 80 }}>
+                          <div
+                            className={`fill ${s.confidence >= 0.7 ? "accent" : "warn"}`}
+                            style={{ width: `${s.confidence * 100}%` }}
+                          />
+                        </div>
+                        <span>{(s.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {signals.length > SIGNALS_PER_PAGE && (
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, padding: "8px 0" }}>
+                <button
+                  className="btn btn-sm"
+                  disabled={signalPage === 0}
+                  onClick={() => setSignalPage((p) => p - 1)}
+                >
+                  &lt;
+                </button>
+                <span style={{ fontSize: 13 }}>
+                  {signalPage + 1} / {Math.ceil(signals.length / SIGNALS_PER_PAGE)}
+                </span>
+                <button
+                  className="btn btn-sm"
+                  disabled={(signalPage + 1) * SIGNALS_PER_PAGE >= signals.length}
+                  onClick={() => setSignalPage((p) => p + 1)}
+                >
+                  &gt;
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -364,43 +399,45 @@ export default function Strategy() {
         document.body,
       )}
 
-      {/* ── Strategy Settings ───────────── */}
-      <div className="panel">
-        <div className="panel-header">
-          <h3>전략 설정</h3>
-          {settingsFeedback && (
-            <span className={`badge ${settingsFeedback === "적용 완료" ? "profit" : settingsFeedback === "적용 실패" ? "loss" : "neutral"}`}>
-              {settingsFeedback}
-            </span>
-          )}
-        </div>
-        <div className="panel-body">
-          {STRATEGY_FIELDS.map(({ section, key, label, desc, min, max, step, format, hotReload }) => (
-            <div key={`${section}.${key}`} className="slider-row">
-              <span className="slider-label" data-tooltip={desc}>
-                {label}
-                {!hotReload && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>(초기화 필요)</span>}
+      {/* ── Strategy Settings (admin only) ── */}
+      {auth.isAdmin && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>전략 설정</h3>
+            {settingsFeedback && (
+              <span className={`badge ${settingsFeedback === "적용 완료" ? "profit" : settingsFeedback === "적용 실패" ? "loss" : "neutral"}`}>
+                {settingsFeedback}
               </span>
-              <div className="slider-track">
-                <input
-                  type="range" min={min} max={max} step={step}
-                  value={form[section]?.[key] ?? min}
-                  onChange={(e) => handleSlider(section, key, Number(e.target.value))}
-                  disabled={!hotReload}
-                  style={{ opacity: hotReload ? 1 : 0.4 }}
-                />
+            )}
+          </div>
+          <div className="panel-body">
+            {STRATEGY_FIELDS.map(({ section, key, label, desc, min, max, step, format, hotReload }) => (
+              <div key={`${section}.${key}`} className="slider-row">
+                <span className="slider-label" data-tooltip={desc}>
+                  {label}
+                  {!hotReload && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>(초기화 필요)</span>}
+                </span>
+                <div className="slider-track">
+                  <input
+                    type="range" min={min} max={max} step={step}
+                    value={form[section]?.[key] ?? min}
+                    onChange={(e) => handleSlider(section, key, Number(e.target.value))}
+                    disabled={!hotReload}
+                    style={{ opacity: hotReload ? 1 : 0.4 }}
+                  />
+                </div>
+                <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
               </div>
-              <span className="slider-value">{format(form[section]?.[key] ?? min)}</span>
+            ))}
+            <div className="slider-buttons">
+              <button className="btn" onClick={handleSettingsReset} disabled={saving || !hasSettingsChanges()}>초기화</button>
+              <button className="btn btn-primary" onClick={handleSettingsApply} disabled={saving || !hasSettingsChanges()}>
+                {saving ? "적용 중..." : "적용"}
+              </button>
             </div>
-          ))}
-          <div className="slider-buttons">
-            <button className="btn" onClick={handleSettingsReset} disabled={saving || !hasSettingsChanges()}>초기화</button>
-            <button className="btn btn-primary" onClick={handleSettingsApply} disabled={saving || !hasSettingsChanges()}>
-              {saving ? "적용 중..." : "적용"}
-            </button>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ── Model Status ───────────────────── */}
       <div className="panel">
