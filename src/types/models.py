@@ -93,3 +93,16 @@ class DailySummary:
     win_trades: int
     loss_trades: int
     max_drawdown_pct: Decimal
+
+
+@dataclass(frozen=True)
+class RankingEntry:
+    rank: int
+    user_id: int
+    nickname: str
+    return_pct: Decimal
+    win_rate: Decimal
+    total_trades: int
+    max_drawdown_pct: Decimal
+    daily_equities: tuple[Decimal, ...]
+    is_me: bool
