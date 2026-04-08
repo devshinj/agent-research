@@ -116,6 +116,81 @@ class PaperEngine:
             fee=fee,
         )
 
+    def execute_limit_buy(
+        self,
+        account: PaperAccount,
+        market: str,
+        current_price: Decimal,
+        frozen_amount: Decimal,
+        reason: str | None = None,
+    ) -> tuple[Order, Decimal]:
+        """Execute a limit buy using pre-frozen cash.
+
+        Returns (order, refund) where refund is the difference between
+        frozen_amount and actual cost (spend + fee). Refund is added to cash.
+        """
+        fill_price = current_price * (_ONE + self._config.slippage_rate)
+        # Reduce invest amount so that spend + fee fits within frozen_amount
+        invest_krw = (frozen_amount / (_ONE + self._config.fee_rate)).to_integral_value(
+            rounding=ROUND_DOWN,
+        )
+        quantity = _quantize_quantity(invest_krw, fill_price)
+        actual_spend = _truncate_krw(quantity * fill_price)
+        fee = _truncate_krw(actual_spend * self._config.fee_rate)
+        total_cost = actual_spend + fee
+        refund = frozen_amount - total_cost
+        now = int(time.time())
+
+        # Refund the difference to cash (do NOT deduct — already frozen)
+        account.cash_balance += refund
+
+        trade_mode = "MANUAL"
+
+        existing = account.positions.get(market)
+        if existing is not None:
+            new_total_invested = existing.total_invested + actual_spend
+            new_quantity = existing.quantity + quantity
+            new_entry_price = (
+                new_total_invested / new_quantity
+                if new_quantity > _ZERO else fill_price
+            )
+            existing.entry_price = new_entry_price
+            existing.quantity = new_quantity
+            existing.total_invested = new_total_invested
+            existing.add_count += 1
+            existing.highest_price = max(existing.highest_price, fill_price)
+            existing.trade_mode = "MANUAL"
+        else:
+            account.positions[market] = Position(
+                market=market,
+                side=OrderSide.BUY,
+                entry_price=fill_price,
+                quantity=quantity,
+                entry_time=now,
+                unrealized_pnl=_ZERO,
+                highest_price=fill_price,
+                add_count=0,
+                total_invested=actual_spend,
+                trade_mode=trade_mode,
+            )
+
+        order = Order(
+            id=str(uuid.uuid4()),
+            market=market,
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            price=current_price,
+            quantity=quantity,
+            status=OrderStatus.FILLED,
+            signal_confidence=0.0,
+            reason=reason if reason else "LIMIT_BUY",
+            created_at=now,
+            fill_price=fill_price,
+            filled_at=now,
+            fee=fee,
+        )
+        return order, refund
+
     def execute_sell(
         self,
         account: PaperAccount,
