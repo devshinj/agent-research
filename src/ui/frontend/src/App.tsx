@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { AuthProvider, useAuthContext } from "./context/AuthContext";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Dashboard from "./pages/Dashboard";
@@ -7,6 +7,7 @@ import Exchange from "./pages/Exchange";
 import Strategy from "./pages/Strategy";
 import Risk from "./pages/Risk";
 import System from "./pages/System";
+import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
@@ -40,7 +41,11 @@ function AppRouter() {
 
 function AuthenticatedApp() {
   const { auth, api } = useAuthContext();
-  const { lastMessage, isConnected } = useWebSocket(`${WS_BASE}/ws/live`, auth.accessToken);
+  const handleWsAuthError = useCallback(async () => {
+    const ok = await auth.refresh();
+    if (!ok) auth.logout();
+  }, [auth]);
+  const { lastMessage, isConnected } = useWebSocket(`${WS_BASE}/ws/live`, auth.accessToken, handleWsAuthError);
   const [tradingEnabled, setTradingEnabled] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
   const toastId = useRef(0);
@@ -83,6 +88,7 @@ function AuthenticatedApp() {
           <li><NavLink to="/strategy"><span className="nav-icon">&#9650;</span> 전략</NavLink></li>
           <li><NavLink to="/risk"><span className="nav-icon">&#9679;</span> 리스크</NavLink></li>
           <li><NavLink to="/system"><span className="nav-icon">&#9881;</span> 시스템</NavLink></li>
+          {auth.isAdmin && <li><NavLink to="/admin"><span className="nav-icon">&#9998;</span> 회원 관리</NavLink></li>}
         </ul>
 
         <div className="sidebar-trading">
@@ -111,6 +117,7 @@ function AuthenticatedApp() {
           <Route path="/strategy" element={<Strategy />} />
           <Route path="/risk" element={<Risk />} />
           <Route path="/system" element={<System />} />
+          {auth.isAdmin && <Route path="/admin" element={<Admin />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
