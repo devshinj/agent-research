@@ -101,7 +101,7 @@ async def manual_buy(
     await app.order_repo.save(order, user_id)
     risk_manager.record_trade()
     await app._save_user_state(user_id)
-    app._ws_outbox.append({
+    app._push_ws_message(user_id, {
         "type": "order_filled",
         "data": {
             "market": order.market,
@@ -171,7 +171,7 @@ async def manual_sell(
     assert order.fill_price is not None
     app._record_trade_result_for_user(user_id, entry_price, order.fill_price, quantity if fraction >= Decimal("1") else order.quantity)
     await app._save_user_state(user_id)
-    app._ws_outbox.append({
+    app._push_ws_message(user_id, {
         "type": "order_filled",
         "data": {
             "market": order.market,

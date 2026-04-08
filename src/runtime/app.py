@@ -100,7 +100,7 @@ class App:
         )
         self.screened_markets: list[str] = []
         self.training_in_progress: dict[str, float] = {}  # market -> start epoch
-        self._ws_outbox: list[dict[str, object]] = []
+        self._ws_outbox: dict[int, list[dict[str, object]]] = {}
 
         # Multi-user state
         self.user_accounts: dict[int, PaperAccount] = {}
@@ -109,6 +109,12 @@ class App:
 
         # User repository
         self.user_repo = UserRepo(self.db)
+
+    def _push_ws_message(self, user_id: int, msg: dict[str, object]) -> None:
+        self._ws_outbox.setdefault(user_id, []).append(msg)
+
+    def _pop_ws_messages(self, user_id: int) -> list[dict[str, object]]:
+        return self._ws_outbox.pop(user_id, [])
 
     @staticmethod
     def _candles_to_df(candles: Sequence[Candle]) -> pd.DataFrame:
@@ -674,7 +680,7 @@ class App:
             rm.record_trade()
             self._record_trade_result_for_user(user_id, entry_price, price, quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
-            self._ws_outbox.append({
+            self._push_ws_message(user_id, {
                 "type": "order_filled",
                 "data": {
                     "market": order.market, "side": order.side.value,
@@ -692,7 +698,7 @@ class App:
             await self.order_repo.save(order, user_id)
             self._record_trade_result_for_user(user_id, entry_price, price, sell_quantity)
             await self.event_bus.publish(TradeEvent(order, order.created_at))
-            self._ws_outbox.append({
+            self._push_ws_message(user_id, {
                 "type": "order_filled",
                 "data": {
                     "market": order.market, "side": order.side.value,

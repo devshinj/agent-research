@@ -95,8 +95,8 @@ def create_app() -> FastAPI:
 
                 # Relay queued events (order fills, etc.)
                 if app_instance and hasattr(app_instance, "_ws_outbox"):
-                    while app_instance._ws_outbox:
-                        messages.append(app_instance._ws_outbox.pop(0))
+                    for msg in app_instance._pop_ws_messages(user_id):
+                        messages.append(msg)
 
                 for msg in messages:
                     await ws.send_text(json.dumps(msg))
