@@ -44,3 +44,6 @@ data:
   stale_candle_days: 7
   stale_model_days: 30
   stale_order_days: 90
+auth:
+  access_token_expire_minutes: 30
+  refresh_token_expire_days: 7
