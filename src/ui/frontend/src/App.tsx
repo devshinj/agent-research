@@ -84,13 +84,13 @@ function AuthenticatedApp() {
         </div>
 
         <ul className="sidebar-nav">
-          <li><NavLink to="/" end><span className="nav-icon">&#9632;</span> 대시보드</NavLink></li>
-          <li><NavLink to="/exchange"><span className="nav-icon">◇</span> 거래소</NavLink></li>
-          <li><NavLink to="/strategy"><span className="nav-icon">&#9650;</span> 전략</NavLink></li>
-          <li><NavLink to="/risk"><span className="nav-icon">&#9679;</span> 리스크</NavLink></li>
-          <li><NavLink to="/ranking"><span className="nav-icon">&#9734;</span> 랭킹</NavLink></li>
-          <li><NavLink to="/system"><span className="nav-icon">&#9881;</span> 시스템</NavLink></li>
-          {auth.isAdmin && <li><NavLink to="/admin"><span className="nav-icon">&#9998;</span> 회원 관리</NavLink></li>}
+          <li><NavLink to="/" end><span className="nav-icon">📊</span> 대시보드</NavLink></li>
+          <li><NavLink to="/exchange"><span className="nav-icon">💱</span> 거래소</NavLink></li>
+          <li><NavLink to="/strategy"><span className="nav-icon">🧠</span> 전략</NavLink></li>
+          <li><NavLink to="/risk"><span className="nav-icon">🛡️</span> 리스크</NavLink></li>
+          <li><NavLink to="/ranking"><span className="nav-icon">🏆</span> 랭킹</NavLink></li>
+          <li><NavLink to="/system"><span className="nav-icon">⚙️</span> 시스템</NavLink></li>
+          {auth.isAdmin && <li><NavLink to="/admin"><span className="nav-icon">👥</span> 회원 관리</NavLink></li>}
         </ul>
 
         <div className="sidebar-trading">
