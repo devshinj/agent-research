@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from src.repository.database import Database
 
@@ -89,6 +90,57 @@ class UserRepo:
             " FROM users ORDER BY id"
         )
         return [self._row_to_dict(row) for row in await cursor.fetchall()]
+
+    async def get_cash_balance(self, user_id: int) -> Decimal:
+        cursor = await self._db.conn.execute(
+            "SELECT cash_balance FROM account_state WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise ValueError(f"account_state not found for user_id={user_id}")
+        return Decimal(row[0])
+
+    async def adjust_balance(
+        self, *, user_id: int, admin_id: int, amount: Decimal, memo: str = ""
+    ) -> dict:
+        if amount == Decimal("0"):
+            raise ValueError("금액은 0이 될 수 없습니다")
+        current = await self.get_cash_balance(user_id)
+        new_balance = current + amount
+        if new_balance < Decimal("0"):
+            raise ValueError("잔고 부족: 차감 후 잔고가 음수가 됩니다")
+        now = datetime.now(UTC).isoformat()
+        conn = self._db.conn
+        await conn.execute(
+            "UPDATE account_state SET cash_balance = ?, updated_at = ? WHERE user_id = ?",
+            (str(new_balance), now, user_id),
+        )
+        await conn.execute(
+            "INSERT INTO balance_ledger (user_id, admin_id, amount, balance_after, memo, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, admin_id, str(amount), str(new_balance), memo, now),
+        )
+        await conn.commit()
+        return {
+            "user_id": user_id,
+            "balance_before": current,
+            "balance_after": new_balance,
+            "amount": amount,
+        }
+
+    async def get_balance_history(self, user_id: int) -> list[dict]:
+        cursor = await self._db.conn.execute(
+            "SELECT bl.id, bl.admin_id, u.nickname AS admin_nickname,"
+            " bl.amount, bl.balance_after, bl.memo, bl.created_at"
+            " FROM balance_ledger bl"
+            " JOIN users u ON u.id = bl.admin_id"
+            " WHERE bl.user_id = ?"
+            " ORDER BY bl.id DESC",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+        keys = ("id", "admin_id", "admin_nickname", "amount", "balance_after", "memo", "created_at")
+        return [dict(zip(keys, row, strict=False)) for row in rows]
 
     async def set_active(self, user_id: int, active: bool) -> None:
         await self._db.conn.execute(
