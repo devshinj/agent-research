@@ -443,7 +443,8 @@ export default function Strategy() {
       <div className="panel">
         <div className="panel-header">
           <h3>모델 상태</h3>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn btn-sm" onClick={refreshAll} title="새로고침">&#x21bb;</button>
             {trainingCount > 0 && (
               <span className="badge warn" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>
                 학습 중: {trainingCount}개 마켓
