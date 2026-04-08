@@ -11,6 +11,7 @@ from src.ui.api.auth import configure_auth, decode_token
 from src.ui.api.routes import control, dashboard, exchange, portfolio, risk, strategy
 from src.ui.api.routes import auth as auth_router
 from src.ui.api.routes import admin as admin_router
+from src.ui.api.routes import agent as agent_router
 
 
 def create_app() -> FastAPI:
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(risk.router, prefix="/api/risk", tags=["risk"])
     app.include_router(control.router, prefix="/api/control", tags=["control"])
     app.include_router(exchange.router, prefix="/api/exchange", tags=["exchange"])
+    app.include_router(agent_router.router, prefix="/api/agent", tags=["agent"])
 
     @app.on_event("startup")
     async def _configure_auth_on_startup() -> None:
