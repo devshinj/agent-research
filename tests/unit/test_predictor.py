@@ -74,3 +74,36 @@ def test_predictor_basis_sorted_by_abs_shap(trained_model):
     if signal.signal_type != SignalType.HOLD and len(basis.top_features) > 1:
         abs_shaps = [abs(s) for _, s, _ in basis.top_features]
         assert abs_shaps == sorted(abs_shaps, reverse=True)
+
+
+def make_daily(n=30):
+    np.random.seed(42)
+    close = 50000000 + np.cumsum(np.random.randn(n) * 500000)
+    return pd.DataFrame({
+        "open": close - np.random.rand(n) * 200000,
+        "high": close + np.abs(np.random.randn(n)) * 500000,
+        "low": close - np.abs(np.random.randn(n)) * 500000,
+        "close": close,
+        "volume": np.random.rand(n) * 1000 + 10,
+    })
+
+
+@pytest.fixture
+def trained_model_with_daily(tmp_path):
+    fb = FeatureBuilder()
+    trainer = Trainer(fb, str(tmp_path), 5, 0.3)
+    df = make_data()
+    daily_df = make_daily()
+    result = trainer.train("KRW-BTC", df, daily_df=daily_df)
+    return result["model_path"]
+
+
+def test_predictor_with_daily_context(trained_model_with_daily):
+    fb = FeatureBuilder()
+    predictor = Predictor(fb, min_confidence=0.0)
+    predictor.load_model("KRW-BTC", trained_model_with_daily)
+    df = make_data(200)
+    daily_df = make_daily(30)
+    signal, basis = predictor.predict("KRW-BTC", df, daily_df=daily_df)
+    assert signal.signal_type in (SignalType.BUY, SignalType.HOLD)
+    assert 0 <= signal.confidence <= 1

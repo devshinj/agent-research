@@ -40,7 +40,9 @@ class Predictor:
         # Feature 불일치 감지: 모델이 학습된 feature 목록과 현재 FeatureBuilder 비교
         model_features = meta.get("features")
         current_features = self._fb.get_feature_names()
-        if model_features is not None and set(model_features) != set(current_features):
+        if model_features is not None and not set(model_features).issubset(
+            set(current_features)
+        ):
             logger.warning(
                 "Feature mismatch for %s — model has %d features, builder has %d. "
                 "Skipping load (will retrain).",
@@ -55,7 +57,12 @@ class Predictor:
     def get_model_meta(self, market: str) -> dict[str, Any]:
         return self._model_meta.get(market, {})
 
-    def predict(self, market: str, candle_df: pd.DataFrame) -> tuple[Signal, SignalBasis]:
+    def predict(
+        self,
+        market: str,
+        candle_df: pd.DataFrame,
+        daily_df: pd.DataFrame | None = None,
+    ) -> tuple[Signal, SignalBasis]:
         if market not in self._models:
             raise KeyError(f"No model loaded for {market}")
 
@@ -65,7 +72,26 @@ class Predictor:
         if features.empty:
             return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
+        # 일봉 context feature 합류
+        if daily_df is not None and len(daily_df) >= 20:
+            daily_ctx = self._fb.build_daily_context(daily_df)
+            for col_name, val in daily_ctx.items():
+                features[col_name] = val
+        else:
+            for col_name in self._fb._daily_feature_names():
+                features[col_name] = np.nan
+
         features = features.ffill()
+
+        # 모델 학습 시 사용한 feature 목록으로 컬럼 정렬/선택
+        meta = self._model_meta.get(market, {})
+        model_feature_names: list[str] | None = meta.get("features")
+        if model_feature_names is not None:
+            for col in model_feature_names:
+                if col not in features.columns:
+                    features[col] = np.nan
+            features = features[model_feature_names]
+
         latest = features.iloc[-1:]
         if latest.isna().any(axis=1).iloc[0]:
             return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
