@@ -20,8 +20,8 @@ risk:
   partial_sell_fraction: 0.5
 screening:
   min_volume_krw: 1000000000
-  min_volatility_pct: 3
-  max_volatility_pct: 30
+  min_volatility_pct: 10
+  max_volatility_pct: 50
   max_coins: 8
   refresh_interval_min: 30
   always_include:
@@ -39,12 +39,23 @@ collector:
   daily_candles: 30
   market_refresh_interval_min: 60
   context_timeframes:
-    - {minutes: 1, candles: 500, interval_sec: 60}
-    - {minutes: 3, candles: 4800, interval_sec: 180}
-    - {minutes: 10, candles: 1440, interval_sec: 600}
-    - {minutes: 15, candles: 960, interval_sec: 900}
-    - {minutes: 60, candles: 240, interval_sec: 3600}
+  - minutes: 1
+    candles: 500
+    interval_sec: 60
+  - minutes: 3
+    candles: 4800
+    interval_sec: 180
+  - minutes: 10
+    candles: 1440
+    interval_sec: 600
+  - minutes: 15
+    candles: 960
+    interval_sec: 900
+  - minutes: 60
+    candles: 240
+    interval_sec: 3600
 entry_analyzer:
+  enabled: true
   min_entry_score: 0.3
   price_lookback_candles: 60
 data:

@@ -72,7 +72,7 @@ interface ModelStatus {
 interface StrategyConfig {
   screening: { min_volume_krw: number; min_volatility_pct: number; max_volatility_pct: number; max_coins: number; refresh_interval_min: number; always_include: string[] };
   strategy: { lookahead_minutes: number; threshold_pct: number; retrain_interval_hours: number; min_confidence: number };
-  entry_analyzer: { min_entry_score: number; price_lookback_candles: number };
+  entry_analyzer: { min_entry_score: number; price_lookback_candles: number; enabled: boolean };
 }
 
 interface SettingFieldDef {
@@ -113,6 +113,7 @@ export default function Strategy() {
   const [tooltipSignal, setTooltipSignal] = useState<{ basis: BasisEntry[]; x: number; y: number } | null>(null);
   const [config, setConfig] = useState<StrategyConfig | null>(null);
   const [form, setForm] = useState<Record<string, Record<string, number>>>({});
+  const [entryAnalyzerEnabled, setEntryAnalyzerEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null);
   const [includeHold, setIncludeHold] = useState(false);
@@ -136,6 +137,7 @@ export default function Strategy() {
     if (!auth.isAdmin) return;
     get<StrategyConfig>("/api/control/config").then((data) => {
       setConfig(data);
+      setEntryAnalyzerEnabled(data.entry_analyzer.enabled);
       setForm({
         screening: { min_volume_krw: data.screening.min_volume_krw, min_volatility_pct: data.screening.min_volatility_pct, max_volatility_pct: data.screening.max_volatility_pct, max_coins: data.screening.max_coins },
         strategy: { min_confidence: data.strategy.min_confidence, threshold_pct: data.strategy.threshold_pct, retrain_interval_hours: data.strategy.retrain_interval_hours },
@@ -150,6 +152,7 @@ export default function Strategy() {
 
   const hasSettingsChanges = (): boolean => {
     if (!config) return false;
+    if (entryAnalyzerEnabled !== config.entry_analyzer.enabled) return true;
     return STRATEGY_FIELDS.some(({ section, key }) => {
       const orig = (config[section] as Record<string, unknown>)[key];
       return form[section]?.[key] !== undefined && form[section][key] !== orig;
@@ -158,6 +161,7 @@ export default function Strategy() {
 
   const handleSettingsReset = () => {
     if (!config) return;
+    setEntryAnalyzerEnabled(config.entry_analyzer.enabled);
     setForm({
       screening: { min_volume_krw: config.screening.min_volume_krw, min_volatility_pct: config.screening.min_volatility_pct, max_volatility_pct: config.screening.max_volatility_pct, max_coins: config.screening.max_coins },
       strategy: { min_confidence: config.strategy.min_confidence, threshold_pct: config.strategy.threshold_pct, retrain_interval_hours: config.strategy.retrain_interval_hours },
@@ -169,7 +173,7 @@ export default function Strategy() {
     if (!config) return;
     setSaving(true);
     setSettingsFeedback(null);
-    const patch: Record<string, Record<string, number>> = {};
+    const patch: Record<string, Record<string, number | boolean>> = {};
     for (const { section, key, hotReload } of STRATEGY_FIELDS) {
       if (!hotReload) continue;
       const orig = (config[section] as Record<string, unknown>)[key];
@@ -178,6 +182,11 @@ export default function Strategy() {
         if (!patch[section]) patch[section] = {};
         patch[section][key] = curr;
       }
+    }
+    // entry_analyzer enabled toggle
+    if (entryAnalyzerEnabled !== config.entry_analyzer.enabled) {
+      if (!patch["entry_analyzer"]) patch["entry_analyzer"] = {};
+      patch["entry_analyzer"]["enabled"] = entryAnalyzerEnabled;
     }
     if (Object.keys(patch).length === 0) {
       setSaving(false);
@@ -188,6 +197,7 @@ export default function Strategy() {
     try {
       const res = await patchJson<{ config: StrategyConfig }>("/api/control/config", patch);
       setConfig(res.config);
+      setEntryAnalyzerEnabled(res.config.entry_analyzer.enabled);
       setSettingsFeedback("적용 완료");
       setTimeout(() => setSettingsFeedback(null), 3000);
     } catch {
@@ -411,6 +421,22 @@ export default function Strategy() {
             )}
           </div>
           <div className="panel-body">
+            <div className="slider-row" style={{ borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 8 }}>
+              <span className="slider-label" data-tooltip="진입 분석기를 끄면 BUY 신호 발생 시 바로 매수합니다">
+                진입 분석기 (Entry Analyzer)
+              </span>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={entryAnalyzerEnabled}
+                  onChange={(e) => setEntryAnalyzerEnabled(e.target.checked)}
+                  style={{ width: 18, height: 18, accentColor: "var(--accent)" }}
+                />
+                <span style={{ fontSize: "0.8rem", color: entryAnalyzerEnabled ? "var(--accent)" : "var(--text-muted)" }}>
+                  {entryAnalyzerEnabled ? "ON" : "OFF"}
+                </span>
+              </label>
+            </div>
             {STRATEGY_FIELDS.map(({ section, key, label, desc, min, max, step, format, hotReload }) => (
               <div key={`${section}.${key}`} className="slider-row">
                 <span className="slider-label" data-tooltip={desc}>

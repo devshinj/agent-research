@@ -56,6 +56,7 @@ class App:
             "max_position_pct", "max_open_positions",
             "max_additional_buys", "additional_buy_drop_pct", "additional_buy_ratio",
         },
+        "entry_analyzer": {"enabled", "min_entry_score", "price_lookback_candles"},
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -671,7 +672,7 @@ class App:
                     return
                 price = tickers[0]["price"]
 
-            if not is_additional:
+            if not is_additional and self.settings.entry_analyzer.enabled:
                 async with self._db_lock:
                     candles = await self.candle_repo.get_latest(
                         event.market, f"{self.settings.collector.candle_timeframe}m",

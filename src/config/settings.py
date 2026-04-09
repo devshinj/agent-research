@@ -58,6 +58,7 @@ class StrategyConfig:
 class EntryAnalyzerConfig:
     min_entry_score: Decimal = Decimal("0.5")
     price_lookback_candles: int = 60
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ class Settings:
             entry_analyzer=EntryAnalyzerConfig(
                 min_entry_score=Decimal(str(raw.get("entry_analyzer", {}).get("min_entry_score", "0.5"))),
                 price_lookback_candles=int(raw.get("entry_analyzer", {}).get("price_lookback_candles", 60)),
+                enabled=bool(raw.get("entry_analyzer", {}).get("enabled", True)),
             ),
             auth=AuthConfig(
                 access_token_expire_minutes=int(raw.get("auth", {}).get("access_token_expire_minutes", 30)),
@@ -237,6 +239,7 @@ class Settings:
             "entry_analyzer": {
                 "min_entry_score": float(self.entry_analyzer.min_entry_score),
                 "price_lookback_candles": self.entry_analyzer.price_lookback_candles,
+                "enabled": self.entry_analyzer.enabled,
             },
             "auth": {
                 "access_token_expire_minutes": self.auth.access_token_expire_minutes,
