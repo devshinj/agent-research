@@ -441,6 +441,7 @@ class App:
         new_screening = self.settings.screening
         new_strategy = self.settings.strategy
         new_pt = self.settings.paper_trading
+        new_ea = self.settings.entry_analyzer
 
         if "risk" in patches:
             coerced: dict[str, Any] = {}
@@ -482,12 +483,23 @@ class App:
             new_pt = dataclasses.replace(new_pt, **pt_coerced)
             updated["paper_trading"] = list(patches["paper_trading"].keys())
 
+        if "entry_analyzer" in patches:
+            ea_coerced: dict[str, Any] = {}
+            for k, v in patches["entry_analyzer"].items():
+                if k == "enabled":
+                    ea_coerced[k] = bool(v)
+                else:
+                    ea_coerced[k] = Decimal(str(v)) if k == "min_entry_score" else int(str(v))
+            new_ea = dataclasses.replace(new_ea, **ea_coerced)
+            updated["entry_analyzer"] = list(patches["entry_analyzer"].keys())
+
         self.settings = dataclasses.replace(
             self.settings,
             risk=new_risk,
             screening=new_screening,
             strategy=new_strategy,
             paper_trading=new_pt,
+            entry_analyzer=new_ea,
         )
 
         if "risk" in patches:
