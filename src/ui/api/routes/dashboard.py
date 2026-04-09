@@ -1,10 +1,36 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request
 
 from src.ui.api.auth import get_current_user
 
 router = APIRouter()
+
+
+@router.get("/notifications")
+async def get_notifications(
+    request: Request, limit: int = 50, user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"notifications": [], "unread_count": 0}
+    user_id = user["id"]
+    notifications = await app.notification_repo.get_list(user_id, limit)
+    unread = await app.notification_repo.count_unread(user_id)
+    return {"notifications": notifications, "unread_count": unread}
+
+
+@router.post("/notifications/read-all")
+async def mark_notifications_read(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict[str, bool]:
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"success": False}
+    await app.notification_repo.mark_all_read(user["id"])
+    return {"success": True}
 
 
 @router.get("/markets")

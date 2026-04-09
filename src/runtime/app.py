@@ -73,6 +73,8 @@ class App:
         self.portfolio_repo = PortfolioRepository(self.db)
         self.signal_repo = SignalRepository(self.db)
         self.pending_order_repo = PendingOrderRepo(self.db)
+        from src.repository.notification_repo import NotificationRepo
+        self.notification_repo = NotificationRepo(self.db)
 
         # Services
         self.upbit = UpbitClient()
@@ -641,6 +643,10 @@ class App:
 
         approved, reason = rm.approve(signal_model, account)
         if not approved:
+            await self.notification_repo.save(
+                user_id, event.market, event.signal_type.name, "REJECTED",
+                reason, event.confidence,
+            )
             return
 
         if event.signal_type == SignalType.BUY:
@@ -654,6 +660,10 @@ class App:
                     return
                 price = tickers[0]["price"]
                 if not rm.should_additional_buy(existing, price):
+                    await self.notification_repo.save(
+                        user_id, event.market, "BUY", "REJECTED",
+                        "추가매수 조건 미충족", event.confidence,
+                    )
                     return
             else:
                 tickers = await self.upbit.fetch_tickers([event.market])
@@ -671,6 +681,11 @@ class App:
                     features = self.feature_builder.build(df)
                     entry_score = self.entry_analyzer.score_entry(df, features)
                     if entry_score < self.settings.entry_analyzer.min_entry_score:
+                        await self.notification_repo.save(
+                            user_id, event.market, "BUY", "REJECTED",
+                            f"진입 스코어 부족 ({float(entry_score):.2f} < {float(self.settings.entry_analyzer.min_entry_score):.2f})",
+                            event.confidence,
+                        )
                         return
 
             invest = rm.calculate_position_size(
@@ -682,6 +697,11 @@ class App:
             )
             await self.order_repo.save(order, user_id)
             rm.record_trade()
+            await self.notification_repo.save(
+                user_id, event.market, "BUY", "SUCCESS",
+                f"매수 완료 — {int(invest):,}원, 신뢰도 {event.confidence:.0%}",
+                event.confidence,
+            )
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
         elif event.signal_type == SignalType.SELL:
@@ -696,6 +716,7 @@ class App:
             price = tickers[0]["price"]
             entry_price = position.entry_price
             quantity = position.quantity
+            pnl_pct = (price - entry_price) / entry_price * 100
             order = self.paper_engine.execute_sell(
                 account, event.market, price, "ML_SIGNAL",
             )
@@ -703,6 +724,11 @@ class App:
             rm.record_trade()
             self._record_trade_result_for_user(
                 user_id, entry_price, order.fill_price, quantity,
+            )
+            await self.notification_repo.save(
+                user_id, event.market, "SELL", "SUCCESS",
+                f"매도 완료 — 수익률 {float(pnl_pct):+.1f}%",
+                event.confidence,
             )
             await self.event_bus.publish(TradeEvent(order, order.created_at))
 
@@ -787,10 +813,16 @@ class App:
             position = account.positions[market]
             entry_price = position.entry_price
             quantity = position.quantity
+            pnl_pct = (price - entry_price) / entry_price * 100
             order = self.paper_engine.execute_sell(account, market, price, reason)
             await self.order_repo.save(order, user_id)
             rm.record_trade()
             self._record_trade_result_for_user(user_id, entry_price, price, quantity)
+            reason_label = {"STOP_LOSS": "손절", "TAKE_PROFIT": "익절", "TRAILING_STOP": "트레일링"}.get(reason, reason)
+            await self.notification_repo.save(
+                user_id, market, "SELL", "SUCCESS",
+                f"{reason_label} 발동 — 수익률 {float(pnl_pct):+.1f}%",
+            )
             await self.event_bus.publish(TradeEvent(order, order.created_at))
             self._push_ws_message(user_id, {
                 "type": "order_filled",

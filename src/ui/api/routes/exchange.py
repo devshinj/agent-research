@@ -110,6 +110,10 @@ async def manual_buy(
     )
     await app.order_repo.save(order, user_id)
     risk_manager.record_trade()
+    await app.notification_repo.save(
+        user_id, body.market, "BUY", "SUCCESS",
+        f"수동 매수 완료 — {int(amount):,}원",
+    )
     await app._save_user_state(user_id)
     app._push_ws_message(user_id, {
         "type": "order_filled",
@@ -180,6 +184,11 @@ async def manual_sell(
     risk_manager.record_trade()
     assert order.fill_price is not None
     app._record_trade_result_for_user(user_id, entry_price, order.fill_price, quantity if fraction >= Decimal("1") else order.quantity)
+    pnl_pct = (price - entry_price) / entry_price * 100
+    await app.notification_repo.save(
+        user_id, body.market, "SELL", "SUCCESS",
+        f"수동 매도 완료 — 수익률 {float(pnl_pct):+.1f}%",
+    )
     await app._save_user_state(user_id)
     app._push_ws_message(user_id, {
         "type": "order_filled",

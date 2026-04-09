@@ -11,6 +11,7 @@ import System from "./pages/System";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import NotificationPanel from "./components/NotificationPanel";
 
 const WS_BASE = import.meta.env.VITE_WS_URL || `ws://${window.location.host}`;
 
@@ -113,6 +114,9 @@ function AuthenticatedApp() {
       </aside>
 
       <main className="main-content">
+        <div className="main-topbar">
+          <NotificationPanel />
+        </div>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/exchange" element={<Exchange />} />

@@ -129,6 +129,18 @@ CREATE TABLE IF NOT EXISTS pending_orders (
     expires_at  INTEGER NOT NULL,
     filled_at   INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS trade_notifications (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    market      TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    result      TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    confidence  REAL,
+    created_at  INTEGER NOT NULL,
+    is_read     INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -271,6 +283,42 @@ class Database:
                     ALTER TABLE daily_summary_new RENAME TO daily_summary;
                 """)
 
+        # Migrate positions: change PRIMARY KEY from (market) to (user_id, market)
+        cursor = await self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='positions'"
+        )
+        row = await cursor.fetchone()
+        if row and "PRIMARY KEY (user_id, market)" not in row[0]:
+            await self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS positions_new (
+                    user_id           INTEGER NOT NULL DEFAULT 1,
+                    market            TEXT NOT NULL,
+                    side              TEXT NOT NULL,
+                    entry_price       TEXT NOT NULL,
+                    quantity          TEXT NOT NULL,
+                    entry_time        INTEGER NOT NULL,
+                    unrealized_pnl    TEXT NOT NULL,
+                    highest_price     TEXT NOT NULL,
+                    add_count         INTEGER NOT NULL DEFAULT 0,
+                    total_invested    TEXT NOT NULL DEFAULT '0',
+                    partial_sold      INTEGER NOT NULL DEFAULT 0,
+                    trade_mode        TEXT NOT NULL DEFAULT 'AUTO',
+                    stop_loss_price   TEXT,
+                    take_profit_price TEXT,
+                    PRIMARY KEY (user_id, market)
+                );
+                INSERT OR IGNORE INTO positions_new
+                    (user_id, market, side, entry_price, quantity, entry_time,
+                     unrealized_pnl, highest_price, add_count, total_invested,
+                     partial_sold, trade_mode, stop_loss_price, take_profit_price)
+                    SELECT user_id, market, side, entry_price, quantity, entry_time,
+                           unrealized_pnl, highest_price, add_count, total_invested,
+                           partial_sold, trade_mode, stop_loss_price, take_profit_price
+                    FROM positions;
+                DROP TABLE positions;
+                ALTER TABLE positions_new RENAME TO positions;
+            """)
+
         # ── Reset initial_balance default from 5000000 to 0 ──
         await self._conn.execute(
             "UPDATE user_settings SET initial_balance = '0'"
@@ -305,14 +353,25 @@ class Database:
 
     async def reset_trading_data(self, user_id: int | None = None) -> None:
         """Delete all trading data. Preserves candles and screening_log."""
-        tables = ["orders", "positions", "account_state",
-                  "daily_summary", "risk_state", "signals", "pending_orders"]
-        for table in tables:
-            if user_id is not None and table != "signals":
+        # signals has no user_id column — only wipe on full reset
+        user_tables = ["orders", "positions", "account_state",
+                       "daily_summary", "risk_state", "pending_orders"]
+        global_tables = ["signals"]
+        for table in user_tables:
+            if user_id is not None:
                 await self.conn.execute(
                     f"DELETE FROM {table} WHERE user_id = ?", (user_id,)
                 )
             else:
+                await self.conn.execute(f"DELETE FROM {table}")
+        if user_id is not None:
+            # Reset initial_balance so user starts from zero
+            await self.conn.execute(
+                "UPDATE user_settings SET initial_balance = '0' WHERE user_id = ?",
+                (user_id,),
+            )
+        else:
+            for table in global_tables:
                 await self.conn.execute(f"DELETE FROM {table}")
         await self.conn.commit()
 
