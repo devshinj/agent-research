@@ -81,6 +81,12 @@ class Trainer:
         n_hold = int((y_train == 0).sum())
         n_buy = int((y_train == 1).sum())
         spw = n_hold / max(n_buy, 1)
+        logger.info(
+            "Training %s — samples: %d (train=%d, val=%d), "
+            "buy_ratio: %.1f%% (train_buy=%d, train_hold=%d, spw=%.2f), features: %d",
+            market, len(features), len(X_train), len(X_val),
+            float(labels.mean()) * 100, n_buy, n_hold, spw, X_train.shape[1],
+        )
 
         model = lgb.LGBMClassifier(
             n_estimators=500,

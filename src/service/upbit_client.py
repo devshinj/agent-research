@@ -97,13 +97,19 @@ class UpbitClient:
 
     async def fetch_tickers(self, markets: list[str]) -> list[dict[str, Any]]:
         client = await self._get_http()
-        async with self._semaphore:
-            resp = await client.get(
-                "/ticker",
-                params={"markets": ",".join(markets)},
-            )
+        for attempt in range(3):
+            async with self._semaphore:
+                resp = await client.get(
+                    "/ticker",
+                    params={"markets": ",".join(markets)},
+                )
+            if resp.status_code == 429:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
             resp.raise_for_status()
-        return [self.parse_ticker(raw) for raw in resp.json()]
+            return [self.parse_ticker(raw) for raw in resp.json()]
+        resp.raise_for_status()
+        return []  # unreachable
 
     # ── Parsers ──
 
