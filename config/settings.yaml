@@ -27,24 +27,30 @@ screening:
   always_include:
   - KRW-BTC
 strategy:
-  lookahead_minutes: 5
+  lookahead_minutes: 30
   threshold_pct: 0.2
   retrain_interval_hours: 1
   min_confidence: 0.35
 collector:
   candle_timeframe: 1
   max_candles_per_market: 500
-  train_timeframe: 15
-  train_candles: 960
+  train_timeframe: 5
+  train_candles: 2880
   daily_candles: 30
   market_refresh_interval_min: 60
+  context_timeframes:
+    - {minutes: 1, candles: 500, interval_sec: 60}
+    - {minutes: 3, candles: 4800, interval_sec: 180}
+    - {minutes: 10, candles: 1440, interval_sec: 600}
+    - {minutes: 15, candles: 960, interval_sec: 900}
+    - {minutes: 60, candles: 240, interval_sec: 3600}
 entry_analyzer:
   min_entry_score: 0.3
   price_lookback_candles: 60
 data:
   db_path: data/paper_trader.db
   model_dir: data/models
-  stale_candle_days: 7
+  stale_candle_days: 10
   stale_model_days: 30
   stale_order_days: 90
 auth:

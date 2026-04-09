@@ -61,13 +61,21 @@ class EntryAnalyzerConfig:
 
 
 @dataclass(frozen=True)
+class ContextTimeframe:
+    minutes: int
+    candles: int
+    interval_sec: int
+
+
+@dataclass(frozen=True)
 class CollectorConfig:
     candle_timeframe: int
     max_candles_per_market: int
     market_refresh_interval_min: int
-    train_timeframe: int = 15
-    train_candles: int = 960
+    train_timeframe: int = 5
+    train_candles: int = 2880
     daily_candles: int = 30
+    context_timeframes: tuple[ContextTimeframe, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,9 +154,17 @@ class Settings:
                 candle_timeframe=int(raw["collector"]["candle_timeframe"]),
                 max_candles_per_market=int(raw["collector"]["max_candles_per_market"]),
                 market_refresh_interval_min=int(raw["collector"]["market_refresh_interval_min"]),
-                train_timeframe=int(raw["collector"].get("train_timeframe", 15)),
-                train_candles=int(raw["collector"].get("train_candles", 960)),
+                train_timeframe=int(raw["collector"].get("train_timeframe", 5)),
+                train_candles=int(raw["collector"].get("train_candles", 2880)),
                 daily_candles=int(raw["collector"].get("daily_candles", 30)),
+                context_timeframes=tuple(
+                    ContextTimeframe(
+                        minutes=int(ct["minutes"]),
+                        candles=int(ct["candles"]),
+                        interval_sec=int(ct["interval_sec"]),
+                    )
+                    for ct in raw["collector"].get("context_timeframes", [])
+                ),
             ),
             entry_analyzer=EntryAnalyzerConfig(
                 min_entry_score=Decimal(str(raw.get("entry_analyzer", {}).get("min_entry_score", "0.5"))),
@@ -213,6 +229,10 @@ class Settings:
                 "train_timeframe": self.collector.train_timeframe,
                 "train_candles": self.collector.train_candles,
                 "daily_candles": self.collector.daily_candles,
+                "context_timeframes": [
+                    {"minutes": ct.minutes, "candles": ct.candles, "interval_sec": ct.interval_sec}
+                    for ct in self.collector.context_timeframes
+                ],
             },
             "entry_analyzer": {
                 "min_entry_score": float(self.entry_analyzer.min_entry_score),

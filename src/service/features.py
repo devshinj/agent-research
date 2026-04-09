@@ -127,60 +127,75 @@ class FeatureBuilder:
             result.iloc[bar_start:bar_end] = val
         return result
 
-    def build_daily_context(self, daily_df: pd.DataFrame) -> pd.Series:  # type: ignore[type-arg]
-        """일봉 DataFrame에서 최신 context feature 1행(Series)을 반환한다."""
-        if len(daily_df) < 20:
-            return pd.Series(
-                {k: np.nan for k in self._daily_feature_names()},
-                dtype=float,
-            )
+    # ── Context timeframe labels (order matters for feature naming) ──
+    CONTEXT_TIMEFRAMES: list[str] = ["1m", "3m", "10m", "15m", "60m", "1D"]
 
-        close = daily_df["close"]
-        high = daily_df["high"]
-        low = daily_df["low"]
-        volume = daily_df["volume"]
+    def _build_tf_context(self, df: pd.DataFrame, prefix: str) -> dict[str, float]:
+        """단일 타임프레임에서 6개 context feature를 추출한다."""
+        close = df["close"]
+        high = df["high"]
+        low = df["low"]
+        volume = df["volume"]
 
         result: dict[str, float] = {}
 
-        # daily_rsi_14
         rsi = ta.momentum.rsi(close, window=14)
-        result["daily_rsi_14"] = float(rsi.iloc[-1])
+        result[f"{prefix}_rsi_14"] = float(rsi.iloc[-1])
 
-        # daily_ema_5_ratio
         ema5 = ta.trend.ema_indicator(close, window=5)
-        result["daily_ema_5_ratio"] = float(close.iloc[-1] / ema5.iloc[-1] - 1)
+        result[f"{prefix}_ema_5_ratio"] = float(close.iloc[-1] / ema5.iloc[-1] - 1)
 
-        # daily_ema_20_ratio
         ema20 = ta.trend.ema_indicator(close, window=20)
-        result["daily_ema_20_ratio"] = float(close.iloc[-1] / ema20.iloc[-1] - 1)
+        result[f"{prefix}_ema_20_ratio"] = float(close.iloc[-1] / ema20.iloc[-1] - 1)
 
-        # daily_volume_ratio
         vol_ma5 = volume.rolling(5).mean()
-        result["daily_volume_ratio"] = float(volume.iloc[-1] / vol_ma5.iloc[-1])
+        result[f"{prefix}_volume_ratio"] = float(volume.iloc[-1] / vol_ma5.iloc[-1])
 
-        # daily_trend: EMA(5) 기울기 → 1(상승), 0(횡보), -1(하락)
         ema5_diff = ema5.diff().iloc[-1]
         if ema5_diff > 0:
-            result["daily_trend"] = 1.0
+            result[f"{prefix}_trend"] = 1.0
         elif ema5_diff < 0:
-            result["daily_trend"] = -1.0
+            result[f"{prefix}_trend"] = -1.0
         else:
-            result["daily_trend"] = 0.0
+            result[f"{prefix}_trend"] = 0.0
 
-        # daily_atr_ratio
         atr = ta.volatility.average_true_range(high, low, close, window=14)
         current_range = float(high.iloc[-1] - low.iloc[-1])
         atr_val = float(atr.iloc[-1])
-        result["daily_atr_ratio"] = current_range / atr_val if atr_val != 0 else 0.0
+        result[f"{prefix}_atr_ratio"] = current_range / atr_val if atr_val != 0 else 0.0
 
+        return result
+
+    def build_multi_context(
+        self, context_dfs: dict[str, pd.DataFrame],
+    ) -> pd.Series:  # type: ignore[type-arg]
+        """여러 타임프레임의 context feature를 합쳐서 반환한다.
+        Keys: "1m", "3m", "10m", "15m", "60m", "1D" 등.
+        """
+        result: dict[str, float] = {}
+        for tf in self.CONTEXT_TIMEFRAMES:
+            prefix = f"ctx_{tf.replace('m', 'M').replace('D', 'D')}"
+            df = context_dfs.get(tf)
+            if df is not None and len(df) >= 20:
+                result.update(self._build_tf_context(df, prefix))
+            else:
+                for name in self._context_feature_suffixes():
+                    result[f"{prefix}_{name}"] = np.nan
         return pd.Series(result, dtype=float)
 
     @staticmethod
-    def _daily_feature_names() -> list[str]:
-        return [
-            "daily_rsi_14", "daily_ema_5_ratio", "daily_ema_20_ratio",
-            "daily_volume_ratio", "daily_trend", "daily_atr_ratio",
-        ]
+    def _context_feature_suffixes() -> list[str]:
+        return ["rsi_14", "ema_5_ratio", "ema_20_ratio",
+                "volume_ratio", "trend", "atr_ratio"]
+
+    @staticmethod
+    def context_feature_names() -> list[str]:
+        names: list[str] = []
+        for tf in FeatureBuilder.CONTEXT_TIMEFRAMES:
+            prefix = f"ctx_{tf.replace('m', 'M').replace('D', 'D')}"
+            for suffix in FeatureBuilder._context_feature_suffixes():
+                names.append(f"{prefix}_{suffix}")
+        return names
 
     def get_feature_names(self) -> list[str]:
         return [
@@ -193,4 +208,4 @@ class FeatureBuilder:
             "volume_ratio_5m", "volume_ratio_20m", "volume_trend",
             "ema_30m", "rsi_14_5m",
             "ema_1h", "trend_1h",
-        ] + FeatureBuilder._daily_feature_names()
+        ] + self.context_feature_names()

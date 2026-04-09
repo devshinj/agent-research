@@ -61,7 +61,7 @@ class Predictor:
         self,
         market: str,
         candle_df: pd.DataFrame,
-        daily_df: pd.DataFrame | None = None,
+        context_dfs: dict[str, pd.DataFrame] | None = None,
     ) -> tuple[Signal, SignalBasis]:
         if market not in self._models:
             raise KeyError(f"No model loaded for {market}")
@@ -72,11 +72,10 @@ class Predictor:
         if features.empty:
             return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
-        # 일봉 context feature 합류
-        has_daily = daily_df is not None and len(daily_df) >= 20
-        if has_daily:
-            daily_ctx = self._fb.build_daily_context(daily_df)
-            for col_name, val in daily_ctx.items():
+        # 멀티 타임프레임 context feature 합류
+        if context_dfs:
+            ctx = self._fb.build_multi_context(context_dfs)
+            for col_name, val in ctx.items():
                 features[col_name] = val
 
         features = features.ffill()

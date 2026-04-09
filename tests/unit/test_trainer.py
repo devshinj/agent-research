@@ -79,18 +79,25 @@ def make_daily_data(n: int = 30) -> pd.DataFrame:
     })
 
 
-def test_trainer_with_daily_context(tmp_path):
-    """학습 시 일봉 context를 전달하면 30개 feature 모델이 생성된다."""
+def test_trainer_with_multi_context(tmp_path):
+    """학습 시 멀티 context를 전달하면 60개 feature 모델이 생성된다."""
     df = make_training_data(500)
-    daily_df = make_daily_data(30)
+    context_dfs = {
+        "1m": make_training_data(100),
+        "3m": make_training_data(100),
+        "10m": make_training_data(100),
+        "15m": make_training_data(100),
+        "60m": make_training_data(100),
+        "1D": make_daily_data(30),
+    }
     feature_builder = FeatureBuilder()
     trainer = Trainer(feature_builder, str(tmp_path), 5, 0.3)
-    result = trainer.train("KRW-BTC", df, daily_df=daily_df)
+    result = trainer.train("KRW-BTC", df, context_dfs=context_dfs)
     assert result["model_path"] is not None
     import json
     meta = json.loads(result["model_path"].with_suffix(".json").read_text())
-    assert "daily_rsi_14" in meta["features"]
-    assert len(meta["features"]) == 30
+    assert "ctx_1D_rsi_14" in meta["features"]
+    assert len(meta["features"]) == 60
 
 
 def test_trainer_metadata_includes_f1(tmp_path):

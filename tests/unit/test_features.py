@@ -84,37 +84,40 @@ def make_daily_df(n: int = 30) -> pd.DataFrame:
     })
 
 
-def test_build_daily_context_returns_series():
+def test_build_multi_context_returns_series():
     df = make_daily_df(30)
     builder = FeatureBuilder()
-    ctx = builder.build_daily_context(df)
+    ctx = builder.build_multi_context({"1D": df, "1m": make_candle_df(100)})
     assert isinstance(ctx, pd.Series)
-    expected_keys = [
-        "daily_rsi_14", "daily_ema_5_ratio", "daily_ema_20_ratio",
-        "daily_volume_ratio", "daily_trend", "daily_atr_ratio",
-    ]
-    for key in expected_keys:
-        assert key in ctx.index, f"Missing daily context feature: {key}"
+    assert "ctx_1D_rsi_14" in ctx.index
+    assert "ctx_1M_rsi_14" in ctx.index
 
 
-def test_build_daily_context_no_nan_with_enough_data():
-    df = make_daily_df(30)
+def test_build_multi_context_no_nan_with_enough_data():
     builder = FeatureBuilder()
-    ctx = builder.build_daily_context(df)
-    assert not ctx.isna().any(), f"NaN found in daily context: {ctx[ctx.isna()].index.tolist()}"
+    context_dfs = {
+        "1m": make_candle_df(100),
+        "3m": make_candle_df(100),
+        "10m": make_candle_df(100),
+        "15m": make_candle_df(100),
+        "60m": make_candle_df(100),
+        "1D": make_daily_df(30),
+    }
+    ctx = builder.build_multi_context(context_dfs)
+    assert not ctx.isna().any(), f"NaN found: {ctx[ctx.isna()].index.tolist()}"
 
 
-def test_build_daily_context_short_data_returns_nan():
-    df = make_daily_df(5)
+def test_build_multi_context_short_data_returns_nan():
     builder = FeatureBuilder()
-    ctx = builder.build_daily_context(df)
+    ctx = builder.build_multi_context({"1D": make_daily_df(5)})
     assert isinstance(ctx, pd.Series)
-    assert len(ctx) == 6
+    # 6 timeframes × 6 features = 36
+    assert len(ctx) == 36
 
 
-def test_get_feature_names_includes_daily():
+def test_get_feature_names_60():
     builder = FeatureBuilder()
     names = builder.get_feature_names()
-    assert "daily_rsi_14" in names
-    assert "daily_trend" in names
-    assert len(names) == 30
+    assert "ctx_1D_rsi_14" in names
+    assert "ctx_1M_trend" in names
+    assert len(names) == 60

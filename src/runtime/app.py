@@ -83,6 +83,7 @@ class App:
             train_timeframe=settings.collector.train_timeframe,
             train_candles=settings.collector.train_candles,
             daily_candles=settings.collector.daily_candles,
+            context_timeframes=settings.collector.context_timeframes,
         )
         self.screener = Screener(settings.screening)
         self.feature_builder = FeatureBuilder()
@@ -96,6 +97,7 @@ class App:
             settings.data.model_dir,
             settings.strategy.lookahead_minutes,
             float(settings.strategy.threshold_pct),
+            train_timeframe=settings.collector.train_timeframe,
         )
 
         # State (kept as fallback)
@@ -206,8 +208,10 @@ class App:
         if self.screened_markets:
             logger.info("Seeding candle history for %d screened markets...", len(self.screened_markets))
             await self.collector.collect_candles(self.screened_markets)
-            logger.info("Seeding training data (15m + daily) for %d markets...", len(self.screened_markets))
+            logger.info("Seeding training data (5m) for %d markets...", len(self.screened_markets))
             await self.collector.collect_train_candles(self.screened_markets)
+            logger.info("Seeding all context timeframes for %d markets...", len(self.screened_markets))
+            await self.collector.collect_all_context(self.screened_markets)
         await self._train_missing_models()
 
         # Schedule periodic tasks
@@ -231,9 +235,20 @@ class App:
             "retrain_models", self._retrain,
             interval_seconds=self.settings.strategy.retrain_interval_hours * 3600,
         )
+        # Context 타임프레임별 수집 스케줄
+        scheduled_intervals: set[int] = set()
+        for ct in self.settings.collector.context_timeframes:
+            if ct.interval_sec not in scheduled_intervals and ct.interval_sec != 60:
+                self.scheduler.schedule_interval(
+                    f"collect_ctx_{ct.interval_sec}s",
+                    lambda iv=ct.interval_sec: self._collect_context(iv),
+                    interval_seconds=ct.interval_sec,
+                )
+                scheduled_intervals.add(ct.interval_sec)
+        # 일봉 + 학습 메인(5분봉)은 1시간마다
         self.scheduler.schedule_interval(
             "collect_train_data", self._collect_train_data,
-            interval_seconds=900,  # 15분마다
+            interval_seconds=3600,
         )
         self.scheduler.schedule_interval(
             "cleanup_stale_data", self._cleanup_stale_data,
@@ -272,10 +287,25 @@ class App:
             loaded += 1
         return loaded
 
+    async def _build_context_dfs(self, market: str) -> dict[str, pd.DataFrame]:
+        """DB에서 각 context 타임프레임의 캔들을 조회하여 dict로 반환."""
+        context_dfs: dict[str, pd.DataFrame] = {}
+        for ct in self.settings.collector.context_timeframes:
+            tf_str = f"{ct.minutes}m"
+            candles = await self.candle_repo.get_latest(market, tf_str, ct.candles)
+            if len(candles) >= 20:
+                context_dfs[tf_str] = self._candles_to_df(candles)
+        daily = await self.candle_repo.get_latest(
+            market, "1D", self.settings.collector.daily_candles,
+        )
+        if len(daily) >= 20:
+            context_dfs["1D"] = self._candles_to_df(daily)
+        return context_dfs
+
     async def _train_missing_models(self) -> None:
         """Train models for screened markets that don't have a loaded model."""
         train_tf = f"{self.settings.collector.train_timeframe}m"
-        pending: dict[str, tuple[pd.DataFrame, pd.DataFrame | None]] = {}
+        pending: dict[str, tuple[pd.DataFrame, dict[str, pd.DataFrame]]] = {}
 
         async with self._db_lock:
             for market in self.screened_markets:
@@ -288,17 +318,13 @@ class App:
                     logger.info("Not enough %s candles for %s: %d", train_tf, market, len(candles))
                     continue
                 df = self._candles_to_df(candles)
+                context_dfs = await self._build_context_dfs(market)
+                pending[market] = (df, context_dfs)
 
-                daily_candles = await self.candle_repo.get_latest(
-                    market, "1D", self.settings.collector.daily_candles,
-                )
-                daily_df = self._candles_to_df(daily_candles) if len(daily_candles) >= 20 else None
-                pending[market] = (df, daily_df)
-
-        for market, (df, daily_df) in pending.items():
+        for market, (df, context_dfs) in pending.items():
             self.training_in_progress[market] = time.time()
             try:
-                result = self.trainer.train(market, df, daily_df=daily_df)
+                result = self.trainer.train(market, df, context_dfs=context_dfs or None)
                 if result["model_path"] is not None:
                     self.predictor.load_model(market, result["model_path"])
                     logger.info(
@@ -325,18 +351,15 @@ class App:
                 candles = await self.candle_repo.get_latest(
                     market, train_tf, self.settings.collector.train_candles,
                 )
-                daily_candles = await self.candle_repo.get_latest(
-                    market, "1D", self.settings.collector.daily_candles,
-                )
+                context_dfs = await self._build_context_dfs(market)
             if len(candles) < 200:
                 continue
             total += 1
             df = self._candles_to_df(candles)
-            daily_df = self._candles_to_df(daily_candles) if len(daily_candles) >= 20 else None
 
             self.training_in_progress[market] = time.time()
             try:
-                result = self.trainer.train(market, df, daily_df=daily_df)
+                result = self.trainer.train(market, df, context_dfs=context_dfs or None)
                 if result["model_path"] is not None:
                     self.predictor.load_model(market, result["model_path"])
                     trained += 1
@@ -372,6 +395,7 @@ class App:
                 new_settings.data.model_dir,
                 new_settings.strategy.lookahead_minutes,
                 float(new_settings.strategy.threshold_pct),
+                train_timeframe=new_settings.collector.train_timeframe,
             )
             self.account = PaperAccount(
                 initial_balance=new_settings.paper_trading.initial_balance,
@@ -552,15 +576,12 @@ class App:
                     continue
 
                 df = self._candles_to_df(candles)
-
-                # 일봉 context 조회
-                daily_candles = await self.candle_repo.get_latest(
-                    market, "1D", self.settings.collector.daily_candles,
-                )
-                daily_df = self._candles_to_df(daily_candles) if len(daily_candles) >= 20 else None
+                context_dfs = await self._build_context_dfs(market)
 
                 try:
-                    signal, basis = self.predictor.predict(market, df, daily_df=daily_df)
+                    signal, basis = self.predictor.predict(
+                        market, df, context_dfs=context_dfs or None,
+                    )
                     basis_json: str | None = None
                     if basis.top_features:
                         basis_json = json.dumps([
@@ -578,11 +599,18 @@ class App:
                     logger.warning("%s: no trained model loaded — skipping prediction", market)
 
     async def _collect_train_data(self) -> None:
-        """15분봉 + 일봉 수집 (학습 데이터용)."""
+        """학습 메인 타임프레임(5m) + 일봉 수집."""
         if not self.screened_markets:
             return
         async with self._db_lock:
             await self.collector.collect_train_candles(self.screened_markets)
+
+    async def _collect_context(self, interval_sec: int) -> None:
+        """특정 interval에 해당하는 context 타임프레임 수집."""
+        if not self.screened_markets:
+            return
+        async with self._db_lock:
+            await self.collector.collect_context_candles(self.screened_markets, interval_sec)
 
     async def _on_signal(self, event: SignalEvent) -> None:
         if self.paused:

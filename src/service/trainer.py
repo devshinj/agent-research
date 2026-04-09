@@ -24,10 +24,13 @@ class Trainer:
         model_dir: str,
         lookahead_minutes: int,
         threshold_pct: float,
+        train_timeframe: int = 5,
     ) -> None:
         self._fb = feature_builder
         self._model_dir = Path(model_dir)
-        self._lookahead = lookahead_minutes
+        self._lookahead_minutes = lookahead_minutes
+        self._train_timeframe = train_timeframe
+        self._lookahead = max(1, lookahead_minutes // train_timeframe)
         self._threshold = threshold_pct
 
     def update_threshold(self, value: float) -> None:
@@ -45,17 +48,17 @@ class Trainer:
         self,
         market: str,
         candle_df: pd.DataFrame,
-        daily_df: pd.DataFrame | None = None,
+        context_dfs: dict[str, pd.DataFrame] | None = None,
     ) -> dict[str, Any]:
         features = self._fb.build(candle_df)
         if features.empty:
             logger.warning("Insufficient data for %s", market)
             return {"accuracy": 0, "f1": 0.0, "model_path": None}
 
-        # 일봉 context feature 합류
-        if daily_df is not None and len(daily_df) >= 20:
-            daily_ctx = self._fb.build_daily_context(daily_df)
-            for col_name, val in daily_ctx.items():
+        # 멀티 타임프레임 context feature 합류
+        if context_dfs:
+            ctx = self._fb.build_multi_context(context_dfs)
+            for col_name, val in ctx.items():
                 features[col_name] = val
 
         labels = self._create_labels(candle_df).loc[features.index]

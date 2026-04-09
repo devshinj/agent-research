@@ -89,21 +89,29 @@ def make_daily(n=30):
 
 
 @pytest.fixture
-def trained_model_with_daily(tmp_path):
+def trained_model_with_context(tmp_path):
     fb = FeatureBuilder()
     trainer = Trainer(fb, str(tmp_path), 5, 0.3)
     df = make_data()
-    daily_df = make_daily()
-    result = trainer.train("KRW-BTC", df, daily_df=daily_df)
+    context_dfs = {
+        "1m": make_data(100), "3m": make_data(100),
+        "10m": make_data(100), "15m": make_data(100),
+        "60m": make_data(100), "1D": make_daily(),
+    }
+    result = trainer.train("KRW-BTC", df, context_dfs=context_dfs)
     return result["model_path"]
 
 
-def test_predictor_with_daily_context(trained_model_with_daily):
+def test_predictor_with_multi_context(trained_model_with_context):
     fb = FeatureBuilder()
     predictor = Predictor(fb, min_confidence=0.0)
-    predictor.load_model("KRW-BTC", trained_model_with_daily)
+    predictor.load_model("KRW-BTC", trained_model_with_context)
     df = make_data(200)
-    daily_df = make_daily(30)
-    signal, basis = predictor.predict("KRW-BTC", df, daily_df=daily_df)
+    context_dfs = {
+        "1m": make_data(100), "3m": make_data(100),
+        "10m": make_data(100), "15m": make_data(100),
+        "60m": make_data(100), "1D": make_daily(30),
+    }
+    signal, basis = predictor.predict("KRW-BTC", df, context_dfs=context_dfs)
     assert signal.signal_type in (SignalType.BUY, SignalType.HOLD)
     assert 0 <= signal.confidence <= 1

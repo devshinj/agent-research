@@ -94,8 +94,12 @@ def test_collector_multi_timeframe_fields() -> None:
         "collector": {
             "candle_timeframe": 1, "max_candles_per_market": 500,
             "market_refresh_interval_min": 60,
-            "train_timeframe": 15, "train_candles": 960,
+            "train_timeframe": 5, "train_candles": 2880,
             "daily_candles": 30,
+            "context_timeframes": [
+                {"minutes": 1, "candles": 500, "interval_sec": 60},
+                {"minutes": 3, "candles": 4800, "interval_sec": 180},
+            ],
         },
         "data": {
             "db_path": "data/paper_trader.db", "model_dir": "data/models",
@@ -103,9 +107,11 @@ def test_collector_multi_timeframe_fields() -> None:
             "stale_order_days": 90,
         },
     })
-    assert settings.collector.train_timeframe == 15
-    assert settings.collector.train_candles == 960
+    assert settings.collector.train_timeframe == 5
+    assert settings.collector.train_candles == 2880
     assert settings.collector.daily_candles == 30
+    assert len(settings.collector.context_timeframes) == 2
+    assert settings.collector.context_timeframes[0].minutes == 1
 
 
 def test_collector_multi_timeframe_defaults() -> None:
@@ -140,6 +146,7 @@ def test_collector_multi_timeframe_defaults() -> None:
             "stale_order_days": 90,
         },
     })
-    assert settings.collector.train_timeframe == 15
-    assert settings.collector.train_candles == 960
+    assert settings.collector.train_timeframe == 5
+    assert settings.collector.train_candles == 2880
     assert settings.collector.daily_candles == 30
+    assert settings.collector.context_timeframes == ()
