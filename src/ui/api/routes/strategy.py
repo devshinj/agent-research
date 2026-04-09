@@ -99,9 +99,16 @@ async def get_model_status(
 
         models[market] = {
             "accuracy": accuracy,
+            "f1": meta.get("f1", 0),
+            "precision": meta.get("precision", 0),
+            "recall": meta.get("recall", 0),
+            "buy_ratio": meta.get("buy_ratio", 0),
+            "scale_pos_weight": meta.get("scale_pos_weight", 0),
+            "best_iteration": meta.get("best_iteration", -1),
             "last_train": last_train,
             "n_train": n_train,
             "n_val": n_val,
+            "features": len(meta.get("features", [])),
             "total_signals": stats["total_signals"],
             "buy_count": stats["buy_count"],
             "sell_count": stats["sell_count"],

@@ -55,6 +55,34 @@ async def get_candles(
     ]
 
 
+@router.get("/data-status")
+async def get_data_status(
+    request: Request, user: dict = Depends(get_current_user)
+) -> dict:
+    """타임프레임별 캔들 수집 현황."""
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        return {"timeframes": {}}
+
+    cursor = await app.db.conn.execute(
+        """SELECT timeframe, COUNT(*) as cnt, COUNT(DISTINCT market) as markets,
+                  MIN(timestamp) as oldest, MAX(timestamp) as newest
+           FROM candles GROUP BY timeframe"""
+    )
+    rows = await cursor.fetchall()
+    timeframes = {}
+    for row in rows:
+        tf, cnt, markets, oldest, newest = row
+        timeframes[tf] = {
+            "candles": cnt,
+            "markets": markets,
+            "oldest": oldest,
+            "newest": newest,
+        }
+
+    return {"timeframes": timeframes}
+
+
 @router.get("/summary")
 async def get_summary(
     request: Request, user: dict = Depends(get_current_user)
@@ -74,14 +102,18 @@ async def get_summary(
     user_id = user["id"]
     account = app.user_accounts.get(user_id)
     if account is None:
+        # Try loading from DB before falling back
+        await app.load_user(user_id)
+        account = app.user_accounts.get(user_id)
+    if account is None:
         return {
-            "total_equity": "10000000",
-            "cash_balance": "10000000",
+            "total_equity": "0",
+            "cash_balance": "0",
             "daily_pnl": "0",
             "total_pnl": "0",
             "total_return_pct": "0",
             "open_positions": 0,
-            "initial_balance": "10000000",
+            "initial_balance": "0",
         }
 
     # Get current prices for equity calculation

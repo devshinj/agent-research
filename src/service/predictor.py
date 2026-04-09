@@ -73,13 +73,11 @@ class Predictor:
             return Signal(market, SignalType.HOLD, 0.0, int(time.time())), _EMPTY_BASIS
 
         # 일봉 context feature 합류
-        if daily_df is not None and len(daily_df) >= 20:
+        has_daily = daily_df is not None and len(daily_df) >= 20
+        if has_daily:
             daily_ctx = self._fb.build_daily_context(daily_df)
             for col_name, val in daily_ctx.items():
                 features[col_name] = val
-        else:
-            for col_name in self._fb._daily_feature_names():
-                features[col_name] = np.nan
 
         features = features.ffill()
 
