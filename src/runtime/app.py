@@ -541,7 +541,8 @@ class App:
 
             for market in self.screened_markets:
                 candles = await self.candle_repo.get_latest(
-                    market, f"{self.settings.collector.candle_timeframe}m"
+                    market, f"{self.settings.collector.candle_timeframe}m",
+                    self.settings.collector.max_candles_per_market,
                 )
                 if len(candles) < 60:
                     logger.warning(
