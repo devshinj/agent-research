@@ -119,6 +119,8 @@ class Predictor:
         # LightGBM multiclass: flat (1, (n_features+1)*n_classes)
         # reshape to (n_classes, n_features+1)
         n_classes = contrib.shape[1] // (n_features + 1)
+        if n_classes <= pred_class:
+            return _EMPTY_BASIS
         reshaped = contrib[0].reshape(n_classes, n_features + 1)
         # Get contributions for predicted class, exclude bias (last element)
         class_contrib = reshaped[pred_class, :n_features]
