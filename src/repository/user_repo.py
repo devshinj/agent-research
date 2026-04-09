@@ -112,8 +112,10 @@ class UserRepo:
         now = datetime.now(UTC).isoformat()
         conn = self._db.conn
         await conn.execute(
-            "UPDATE account_state SET cash_balance = ?, updated_at = ? WHERE user_id = ?",
-            (str(new_balance), now, user_id),
+            "INSERT INTO account_state (user_id, cash_balance, updated_at)"
+            " VALUES (?, ?, ?)"
+            " ON CONFLICT(user_id) DO UPDATE SET cash_balance = ?, updated_at = ?",
+            (user_id, str(new_balance), now, str(new_balance), now),
         )
         # Adjust initial_balance so admin top-ups don't affect PnL
         row = await conn.execute_fetchall(

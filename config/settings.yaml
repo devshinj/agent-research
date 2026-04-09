@@ -20,9 +20,9 @@ risk:
   partial_sell_fraction: 0.5
 screening:
   min_volume_krw: 1000000000
-  min_volatility_pct: 10
+  min_volatility_pct: 2
   max_volatility_pct: 50
-  max_coins: 8
+  max_coins: 5
   refresh_interval_min: 30
   always_include:
   - KRW-BTC
@@ -55,9 +55,9 @@ collector:
     candles: 240
     interval_sec: 3600
 entry_analyzer:
-  enabled: true
+  enabled: false
   min_entry_score: 0.3
-  price_lookback_candles: 60
+  price_lookback_candles: 100
 data:
   db_path: data/paper_trader.db
   model_dir: data/models

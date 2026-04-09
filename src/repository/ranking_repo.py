@@ -55,14 +55,10 @@ class RankingRepo:
             else:
                 return_pct = Decimal("0")
 
-            # Total equity: latest ending_balance or fallback to cash
-            cursor = await conn.execute(
-                "SELECT ending_balance FROM daily_summary"
-                " WHERE user_id = ? ORDER BY date DESC LIMIT 1",
-                (uid,),
-            )
-            latest = await cursor.fetchone()
-            total_equity = Decimal(latest[0]) if latest else cash_balance
+            # Total equity: use real-time cash_balance from account_state
+            # (positions are not included here — cash only, consistent with
+            #  the data available without live price feeds)
+            total_equity = cash_balance
 
             # Aggregated trade stats from daily_summary
             cursor = await conn.execute(

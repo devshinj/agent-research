@@ -51,7 +51,7 @@ export default function NotificationPanel() {
 
   const handleMarkAllRead = async () => {
     try {
-      await api.post("/api/dashboard/notifications/read-all", {});
+      await api.post("/api/dashboard/notifications/read-all");
       setUnreadCount(0);
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch { /* ignore */ }

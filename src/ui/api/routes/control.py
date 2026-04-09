@@ -83,6 +83,7 @@ async def get_config(
 async def reset(
     request: Request, _: dict = Depends(require_admin)
 ) -> dict[str, str]:
+    """Admin: reset ALL users' trading data (full system reset)."""
     app = getattr(request.app.state, "app", None)
 
     # Reset app state using current settings (don't overwrite YAML)
@@ -96,13 +97,32 @@ async def reset(
 async def reset_account(
     request: Request, user: dict = Depends(get_current_user)
 ) -> dict[str, str]:
-    """Reset the current user's account (balance, positions, orders)."""
+    """Reset the current user's own account (balance, positions, orders)."""
     app = getattr(request.app.state, "app", None)
     if app is None:
         raise HTTPException(status_code=503, detail="Not ready")
 
     await app.reset(app.settings, user_id=user["id"])
     return {"status": "reset"}
+
+
+@router.post("/reset-account/{user_id}")
+async def admin_reset_user_account(
+    user_id: int,
+    request: Request,
+    _: dict = Depends(require_admin),
+) -> dict[str, str]:
+    """Admin: reset a specific user's account (balance, positions, orders)."""
+    app = getattr(request.app.state, "app", None)
+    if app is None:
+        raise HTTPException(status_code=503, detail="Not ready")
+
+    user = await app.user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await app.reset(app.settings, user_id=user_id)
+    return {"status": "reset", "user_id": user_id}
 
 
 @router.patch("/config")

@@ -118,10 +118,8 @@ async def adjust_balance(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    # Sync runtime memory (both cash and initial so PnL stays neutral)
-    if user_id in app.user_accounts:
-        app.user_accounts[user_id].cash_balance = result["balance_after"]
-        app.user_accounts[user_id].initial_balance += amount
+    # Sync runtime memory — reload from DB to ensure consistency
+    await app.load_user(user_id)
 
     return {
         "user_id": user_id,

@@ -74,7 +74,7 @@ class PortfolioRepository:
         )
         if account.positions:
             await self._db.conn.executemany(
-                """INSERT INTO positions
+                """INSERT OR REPLACE INTO positions
                    (market, side, entry_price, quantity, entry_time, unrealized_pnl,
                     highest_price, add_count, total_invested, partial_sold,
                     trade_mode, stop_loss_price, take_profit_price, user_id)
@@ -128,10 +128,16 @@ class PortfolioRepository:
             for r in pos_rows
         }
 
-        # Note: initial_balance is not stored in account_state,
-        # it comes from user_settings. Use cash_balance as placeholder.
+        # Load initial_balance from user_settings (not account_state)
+        cursor = await self._db.conn.execute(
+            "SELECT initial_balance FROM user_settings WHERE user_id = ?",
+            (user_id,),
+        )
+        settings_row = await cursor.fetchone()
+        initial_balance = Decimal(settings_row[0]) if settings_row else cash_balance
+
         return PaperAccount(
-            initial_balance=cash_balance,
+            initial_balance=initial_balance,
             cash_balance=cash_balance,
             positions=positions,
         )
